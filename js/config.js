@@ -2,7 +2,8 @@
 const KT_CONFIG = {
   supabaseUrl: 'https://zwnaufwunzaqchgxyrfv.supabase.co',
   supabaseKey: 'sb_publishable_-m1Qm057XAkFk9IX21wN7Q_de7zzP2C',
-  stationIdleSeconds: 60      // workshop PC signs the worker out after this long with no taps
+  stationIdleSeconds: 60,     // workshop PC signs the worker out after this long with no taps
+  toolCheckAt: '18:30'        // closing time: the foreman's evening tool check
 };
 const STAGES = [
   { id:'metal',  name:'Metalwork',             short:'Metal' },

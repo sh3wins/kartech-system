@@ -6,7 +6,7 @@
    ===================================================================== */
 (function(){
   const POLL_MS = 8000;
-  let S = { workers:[], orders:[], tasks:[], log:[] };
+  let S = { workers:[], orders:[], tasks:[], log:[], mats:[], moves:[], std:[], tools:[], toolChecks:[], toolMissing:[], loans:[], hasCode:null };
   let tab = 'today', loaded = false, busy = false;
 
   const W = id => S.workers.find(w => w.id === id);
@@ -42,7 +42,8 @@
       return;
     }
     $('#who').textContent = session.user.email;
-    ['who','outBtn','live','fab'].forEach(id => $('#' + id).classList.remove('hidden'));
+    ['live','fab','side','mbar'].forEach(id => $('#' + id).classList.remove('hidden'));
+    document.body.classList.add('in');
     show('owner');
     await load();
   }
@@ -61,21 +62,40 @@
     if (busy) return; busy = true;
     try {
       const since = new Date(Date.now() - 30 * 864e5).toISOString();
-      const [w, o, l] = await Promise.all([
+      const [w, o, l, wb, mt, mv, sd, tl, tc, tm, ln, hc] = await Promise.all([
         db.from('ws_workers').select('id,name,stage,active,task_id,locked_until,created_at').order('name'),
         db.from('ws_orders').select('*').or('delivered_at.is.null,delivered_at.gt.' + since).order('created_at', { ascending:false }).limit(400),
-        db.from('ws_log').select('*').order('id', { ascending:false }).limit(30)
+        db.from('ws_log').select('*').order('id', { ascending:false }).limit(60),
+        db.from('orders').select('id,order_no,created_at,status,customer_name,phone,fulfilment,delivery_location,notes,items').in('status', ['received','confirmed','workshop']).order('created_at', { ascending:false }).limit(100),
+        db.from('ws_materials').select('*').order('name'),
+        db.from('ws_moves').select('*').order('id', { ascending:false }).limit(500),
+        db.from('ws_usage_std').select('*'),
+        db.from('ws_tools').select('*').order('name'),
+        db.from('ws_tool_checks').select('*').order('day', { ascending:false }).limit(40),
+        db.from('ws_tool_missing').select('*').order('id', { ascending:false }).limit(300),
+        db.from('ws_tool_loans').select('*').order('id', { ascending:false }).limit(300),
+        db.rpc('ws_has_foreman_pin')
       ]);
       if (w.error || o.error || l.error) throw (w.error || o.error || l.error);
       const ids = o.data.map(x => x.id);
       const t = ids.length ? await db.from('ws_tasks').select('*').in('order_id', ids) : { data: [] };
       if (t.error) throw t.error;
       S.workers = w.data.map(x => ({ id:x.id, name:x.name, stage:x.stage, active:x.active, task:x.task_id, locked: x.locked_until && new Date(x.locked_until) > new Date() }));
-      S.orders = o.data.map(x => ({ id:x.id, ref:x.ref, customer:x.customer, item:x.item, qty:x.qty, deadline:new Date(x.deadline + 'T17:00'), urgency:x.urgency, notes:x.notes, stages:x.stages, delivered: !!x.delivered_at }));
+      S.web = wb.error ? [] : wb.data;
+      S.mats = mt.error ? [] : mt.data.map(x => ({ id:x.id, name:x.name, unit:x.unit, store:+x.in_store, low:+x.low_at, active:x.active, stages:x.stages || [] }));
+      S.moves = mv.error ? [] : mv.data.map(x => ({ id:x.id, at:new Date(x.at).getTime(), mat:x.material_id, kind:x.kind, qty:+x.qty, order:x.order_id, worker:x.worker_id, note:x.note }));
+      S.tools = tl.error ? [] : tl.data.map(x => ({ id:x.id, name:x.name, worker:x.usual_worker, active:x.active }));
+      S.toolChecks = tc.error ? [] : tc.data.map(x => ({ day:String(x.day).slice(0, 10), at:new Date(x.done_at).getTime(), missing:x.missing }));
+      S.loans = ln.error ? [] : ln.data.filter(x => !x.back_at).map(x => ({ tool:x.tool_id, worker:x.worker_id, at:new Date(x.out_at).getTime() }));
+      S.hasCode = hc.error ? null : !!hc.data;
+      S.toolMissing = tm.error ? [] : tm.data.map(x => ({ tool:x.tool_id, worker:x.worker_id, since:String(x.since).slice(0, 10), found: !!x.found_at }));
+      S.std = sd.error ? [] : sd.data.map(x => ({ product:x.product, mat:x.material_id, per:+x.per_piece }));
+      S.orders = o.data.map(x => ({ id:x.id, ref:x.ref, src:x.source_order_id || null, srcNo:x.source_no || null, customer:x.customer, item:x.item, qty:x.qty, deadline:new Date(x.deadline + 'T17:00'), urgency:x.urgency, notes:x.notes, stages:x.stages, delivered: !!x.delivered_at }));
       S.tasks = t.data.map(x => ({ id:x.id, order:x.order_id, step:x.step, stage:x.stage, status:x.status, worker:x.worker_id, rank:x.rank,
         problem: x.problem_at ? { reason:x.problem_reason, at:new Date(x.problem_at).getTime(), stopped:!!x.problem_stopped, ack: !!x.problem_ack_at } : null }));
-      S.log = l.data.map(x => ({ text:x.text, kind:x.kind, at:new Date(x.at).getTime(), order:x.order_id }));
+      S.log = l.data.map(x => ({ id:x.id, text:x.text, kind:x.kind, at:new Date(x.at).getTime(), order:x.order_id }));
       loaded = true;
+      announceChanges();
       $('#live').classList.remove('off'); $('#live').lastChild.textContent = ' Live';
       if (!document.querySelector('.scrim')) render();
       alarmRender();
@@ -96,7 +116,7 @@
   }
 
   /* ---------- views ---------- */
-  document.querySelectorAll('.tabs [data-tab]').forEach(b => b.addEventListener('click', () => { tab = b.dataset.tab; render(); window.scrollTo(0,0); load(); }));
+  document.querySelectorAll('.tabs [data-tab]').forEach(b => b.addEventListener('click', () => { tab = b.dataset.tab; orderFilter = null; enter = true; render(); window.scrollTo(0,0); load(); }));
   $('#newOrderBtn').onclick = $('#fab').onclick = () => newOrderModal();
 
   function attention(){
@@ -105,39 +125,135 @@
       items.push({ lvl:'red', title:`${t.problem.stopped ? 'WORK STOPPED' : 'Problem'}: ${t.problem.reason}${t.problem.stopped && t.problem.ack ? " (you're on it)" : ''}`,
         sub:`${w ? w.name : 'Worker'} · ${o.ref} · ${stageName(t.stage)} · ${ago(t.problem.at)}`, act:`<button class="btn sm" data-solve="${t.id}">Mark solved</button>` }); });
     S.orders.filter(o => !o.delivered && !orderProgress(o).finished && isLate(o.deadline)).forEach(o => items.push({ lvl:'red', title:`${o.ref} is past its deadline`, sub:`${o.qty} × ${o.item} · ${o.customer}`, act:`<button class="btn sm line" data-open="${o.id}">Open</button>` }));
-    S.workers.filter(w => w.active && !w.task).forEach(w => items.push({ lvl:'amber', title:`${w.name} is waiting for work`, sub:`${stageName(w.stage)} · nothing in the line`, act:`<button class="btn sm line" data-tabgo="workshop">See workshop</button>` }));
-    S.workers.filter(w => w.locked).forEach(w => items.push({ lvl:'amber', title:`${w.name} is locked out`, sub:'Too many wrong PINs. Unlocks by itself in 5 minutes, or give a new PIN.', act:`<button class="btn sm line" data-editw="${w.id}">New PIN</button>` }));
+    waitingWeb().forEach(w => items.push({ lvl:'amber', title:`New website order ${w.order_no}`, sub:`${w.customer_name} · ${(w.items || []).map(i => i.qty + ' × ' + i.name).join(', ')} · ${ago(new Date(w.created_at).getTime())}`, act:`<button class="btn sm" data-web="${w.id}">Send to workshop</button>` }));
+    S.mats.filter(m => m.active && m.low > 0 && m.store <= m.low).forEach(m => items.push({ lvl:'amber', title:`Low stock: ${m.name}`, sub:`Only ${n2(m.store)} ${m.unit} left in the store`, act:`<button class="btn sm line" data-move="in" data-mat="${m.id}">Received</button>` }));
+    watchList().slice(0, 3).forEach(a => items.push({ lvl:'red', title:a.title, sub:a.sub, act:`<button class="btn sm line" data-tabgo="stock">See stock</button>` }));
+    openMissing().forEach(x => { const t = TL(x.tool), w = x.worker && W(x.worker); if (!t) return;
+      items.push({ lvl:'red', title:`Tool missing: ${t.name}`, sub:`${w ? 'Normally with ' + w.name + ' · ' : ''}not back since ${fmtDay(new Date(x.since + 'T12:00')).replace(/^(Today|Yesterday)$/, x => x.toLowerCase())}`, act:`<button class="btn sm line" data-toolfound="${t.id}">It's back</button>` }); });
+    if (S.hasCode === false && (S.tools.some(t => t.active) || S.mats.length)) items.push({ lvl:'amber', title:'Set the foreman code', sub:'The foreman needs it to tick tools and materials on the workshop screen', act:`<button class="btn sm line" data-fmcode>Set code</button>` });
+    if (S.tools.some(t => t.active) && checkDue() && !S.toolChecks.find(c => c.day === todayStr()))
+      items.push({ lvl:'amber', title:'Tool check not done yet tonight', sub:`The foreman should check the tools at ${KT_CONFIG.toolCheckAt || '18:30'} on the workshop screen`, act:`<button class="btn sm line" data-tabgo="stock">See tools</button>` });
+    const idle = S.workers.filter(w => w.active && !w.task);
+    if (idle.length) items.push({ lvl:'amber', title: idle.length === 1 ? `${idle[0].name} is waiting for work` : `${idle.slice(0, -1).map(w => w.name).join(', ')} and ${idle[idle.length - 1].name} are waiting for work`,
+      sub: idle.length === 1 ? `${stageName(idle[0].stage)} · nothing in the line` : 'Nothing in their lines. Add an order or send a website order.', act:`<button class="btn sm line" data-tabgo="workshop">See workshop</button>` });
     S.orders.filter(o => !o.delivered && o.urgency === 'urgent' && !orderProgress(o).finished && !isLate(o.deadline)).forEach(o => { const c = orderProgress(o).current;
-      items.push({ lvl:'amber', title:`Urgent: ${o.ref} due ${fmtDay(o.deadline).toLowerCase()}`, sub:`${o.qty} × ${o.item}${c ? ' · now at ' + stageName(c.stage) : ''}`, act:`<button class="btn sm line" data-open="${o.id}">Open</button>` }); });
+      items.push({ lvl:'amber', title:`Urgent: ${o.ref}, due ${fmtDay(o.deadline)}`, sub:`${o.qty} × ${o.item}${c ? ' · now at ' + stageName(c.stage) : ''}`, act:`<button class="btn sm line" data-open="${o.id}">Open</button>` }); });
     S.orders.filter(o => !o.delivered && orderProgress(o).finished).forEach(o => items.push({ lvl:'green', title:`${o.ref} is loaded and ready`, sub:`${o.customer} · confirm when it leaves`, act:`<button class="btn sm" data-deliver="${o.id}">Mark delivered</button>` }));
     return items;
   }
 
+  /* ---------- HOME: what needs her + workshop news ---------- */
+  const OWNER_RX = /^(New order|Website order|New worker added|Worker updated|Owner is on it|Problem solved|Received|Gave|New material added|New tool added|Tool back|Foreman code changed|Stock count: \S+ is correct)|made urgent|delivered to|switched (back on|off)/;
+  const COLORS = ['#1f7a5c','#b5432f','#2f5fa8','#8a5a00','#7b3fa0','#0e7c86','#a0386b','#4d6b1f'];
+  const colorOf = name => COLORS[[...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % COLORS.length];
+  const hhmm = t => new Date(t).toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' });
+  const dayChip = t => { const d = new Date(t), n = new Date(); const y = new Date(); y.setDate(n.getDate() - 1);
+    return d.toDateString() === n.toDateString() ? 'Today' : d.toDateString() === y.toDateString() ? 'Yesterday' : d.toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'short' }); };
+  function chatMsg(l){
+    if (OWNER_RX.test(l.text)) return { me:true, text: l.text.replace(/^Owner is on it:/, "I'm on it:") };
+    const names = S.workers.map(w => w.name).sort((x, y) => y.length - x.length);
+    const n = names.find(n => l.text.startsWith(n + ' '));
+    if (n){ const t = l.text.slice(n.length + 1).replace(/^\(.*?\) has no work waiting$/, 'is waiting for work'); return { from:n, text: t.charAt(0).toUpperCase() + t.slice(1) }; }
+    return { from:'Workshop', sys:true, text:l.text };
+  }
+  function statusLine(){
+    const act = S.workers.filter(w => w.active);
+    if (!act.length) return 'No workers yet';
+    const busy = act.filter(w => workerStatus(w)[0] === 'working').map(w => w.name);
+    const wait = act.filter(w => !w.task).map(w => w.name);
+    const prob = act.filter(w => workerStatus(w)[0] === 'attention').map(w => w.name);
+    const list = (a, word, one) => a.length ? (a.length > 2 ? a.length + ' ' : a.join(', ') + ' ') + (a.length === 1 && one ? one : word) : '';
+    return [list(prob, 'need you', 'needs you'), list(busy, 'working'), list(wait, 'waiting')].filter(Boolean).join(' · ') || 'Everyone has a job';
+  }
+  /* ---------- DASHBOARD ---------- */
+  let enter = true, prevStats = {}, seenAtt = null, orderFilter = null;
+  const orderHealth = o => { const p = orderProgress(o);
+    if (p.finished) return ['ready', 'Ready'];
+    if (isLate(o.deadline)) return ['late', 'Late'];
+    const daysLeft = (o.deadline - Date.now()) / 864e5;
+    const problem = S.tasks.some(t => t.order === o.id && t.problem);
+    if (problem || (daysLeft < 1.5 && p.done / Math.max(1, p.total) < .5)) return ['risk', 'At risk'];
+    return ['track', 'On track'];
+  };
   function viewToday(){
     const att = attention();
-    const active = S.workers.filter(w => w.active);
-    const working = active.filter(w => workerStatus(w)[0] === 'working').length;
-    const waiting = active.filter(w => !w.task).length;
-    const probs = S.tasks.filter(t => t.problem).length;
-    const late = S.orders.filter(o => !o.delivered && !orderProgress(o).finished && isLate(o.deadline)).length;
-    const h = new Date().getHours();
-    const firstRun = !S.workers.length ? `<div class="list" style="margin-bottom:18px"><div class="item"><span class="dot amber"></span><div class="grow"><div class="t">Start here: add your workers</div><div class="s">Give each one a 4-digit PIN. Then add your first order.</div></div><button class="btn sm" data-tabgo="workers">Add workers</button></div></div>` : '';
-    return `
-      <h2>Good ${h < 12 ? 'morning' : h < 17 ? 'afternoon' : 'evening'}</h2>
-      <p class="sub">What needs you right now. Everything else is running on its own.</p>
-      ${firstRun}
-      <div class="cards">
-        <button class="stat ${probs ? 'alert' : ''}" data-tabgo="workshop"><b>${probs}</b><span>Problems reported</span></button>
-        <button class="stat ${waiting ? 'warn' : ''}" data-tabgo="workshop"><b>${waiting}</b><span>Waiting for work</span></button>
-        <button class="stat ${late ? 'alert' : ''}" data-tabgo="orders"><b>${late}</b><span>Orders past deadline</span></button>
-        <button class="stat" data-tabgo="workshop"><b>${working}/${active.length}</b><span>Workers busy</span></button>
+    const now = new Date(), h = now.getHours();
+    const open = S.orders.filter(o => !o.delivered && !orderProgress(o).finished);
+    const st = {
+      late: open.filter(o => isLate(o.deadline)).length,
+      urgent: open.filter(o => o.urgency === 'urgent').length,
+      waiting: S.tasks.filter(t => t.status === 'queued' && O(t.order) && !O(t.order).delivered).length,
+      working: S.tasks.filter(t => t.status === 'working' || t.status === 'assigned').length
+    };
+    const box = (k, label, sub, go, ico) => { const changed = !enter && prevStats[k] !== undefined && prevStats[k] !== st[k];
+      return `<button class="kpi k-${k} ${st[k] ? 'on' : ''} ${changed ? 'pop' : ''} anim" style="--i:${['late','urgent','waiting','working'].indexOf(k)}" data-go="${go}">
+        <span class="kpi-top"><i class="kpi-ic">${ico}</i>${label}</span>
+        <b data-count="${st[k]}" data-from="${enter ? 0 : (prevStats[k] ?? st[k])}">${enter ? 0 : st[k]}</b>
+        <span class="kpi-sub">${sub}</span><span class="kpi-view">View →</span></button>`; };
+    const keys = att.map(a => a.title);
+    const fresh = seenAtt ? keys.filter(k => !seenAtt.has(k)) : [];
+    seenAtt = new Set(keys);
+    const active = open.slice().sort((a,b) => URG[a.urgency] - URG[b.urgency] || a.deadline - b.deadline).slice(0, 6);
+    const ready = S.orders.filter(o => !o.delivered && orderProgress(o).finished);
+    const web = waitingWeb();
+    const html = `
+      <div class="d-head anim" style="--i:0">
+        <div><p class="d-date">${now.toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short', year:'numeric' })}</p>
+        <h1>Good ${h < 12 ? 'morning' : h < 17 ? 'afternoon' : 'evening'}</h1>
+        <p class="sub" style="margin:0">${att.length ? `Here's what needs your attention today.` : 'Everything is running on its own. ✓'}</p></div>
+        <button class="btn d-new" data-neworder><span>+</span> New order</button>
       </div>
-      <p class="section-title">Needs your attention</p>
-      <div class="list">${att.length ? att.map(a => `
-        <div class="item"><span class="dot ${a.lvl}"></span><div class="grow"><div class="t">${esc(a.title)}</div><div class="s">${esc(a.sub)}</div></div>${a.act}</div>`).join('') : '<p class="empty">Nothing needs you. The workshop is running. ✓</p>'}</div>
-      <p class="section-title">Latest from the workshop</p>
-      <div class="list feed">${S.log.length ? S.log.slice(0, 12).map(l => `
-        <div class="item"><span class="dot ${l.kind === 'alert' ? 'red' : l.kind === 'warn' ? 'amber' : l.kind === 'good' ? 'green' : 'grey'}"></span><div class="grow">${esc(l.text)}</div><span class="when">${ago(l.at)}</span></div>`).join('') : '<p class="empty">Nothing yet.</p>'}</div>`;
+      <div class="kpis">
+        ${box('late', 'Late', 'past the deadline', 'orders:late', '!')}
+        ${box('urgent', 'Urgent', 'jobs to rush', 'orders:urgent', '⚡')}
+        ${box('waiting', 'In line', 'waiting for a worker', 'workshop', '◷')}
+        ${box('working', 'In progress', 'being worked on', 'workshop', '▶')}
+      </div>
+      <div class="d-grid">
+        <div class="d-col">
+          ${att.length ? `<div class="panel anim" style="--i:4"><div class="p-head"><h3>Needs you <span class="count">${att.length}</span></h3></div>
+            ${att.map(a => `<div class="need ${a.lvl} ${fresh.includes(a.title) ? 'fresh' : ''}"><span class="need-dot"></span><div class="grow"><b>${esc(a.title)}</b><p>${esc(a.sub)}</p></div>${a.act}</div>`).join('')}</div>` : ''}
+          <div class="panel anim" style="--i:5"><div class="p-head"><h3>Active orders</h3><button class="link" data-tabgo="orders">View all</button></div>
+            ${active.length ? active.map((o, i) => { const p = orderProgress(o), pct = Math.round(100 * p.done / Math.max(1, p.total)), [hk, hl] = orderHealth(o);
+              return `<button class="ord" data-open="${o.id}">
+                <div class="ord-name"><b>${esc(o.item)}</b> <span class="muted">(${o.ref})</span><small>${o.qty} pcs · ${esc(o.customer)}${p.current ? ' · now at ' + stageName(p.current.stage) : ''}</small></div>
+                <div class="ord-bar"><i class="h-${hk}" style="width:${Math.max(pct, 4)}%;--d:${i * 80}ms"></i></div><span class="ord-pct">${pct}%</span>
+                <span class="ord-due">Due ${fmtDay(o.deadline)}</span><span class="hp h-${hk}">${hl}</span></button>`; }).join('')
+              : `<p class="empty">No open orders. Tap <b>+ New order</b> to add one.</p>`}
+          </div>
+        </div>
+        <div class="d-col">
+          <div class="panel anim" style="--i:6"><div class="p-head"><h3>Quick actions</h3></div>
+            <button class="qa" data-neworder><i>＋</i><span><b>Create order</b><small>Add a job for the workshop</small></span></button>
+            <button class="qa" data-tabgo="orders"><i>🌐</i><span><b>Website orders</b><small>${web.length ? web.length + ' waiting to be sent to the workshop' : 'None waiting'}</small></span>${web.length ? `<em>${web.length}</em>` : ''}</button>
+            <button class="qa" data-move="out"><i>📦</i><span><b>Give out materials</b><small>Record what leaves the store</small></span></button>
+            <button class="qa" data-tabgo="workers"><i>👥</i><span><b>View workers</b><small>${S.workers.filter(w => w.active).length} on the team</small></span></button>
+            ${ready.length ? `<button class="qa" data-tabgo="orders"><i>🚚</i><span><b>Ready to deliver</b><small>${ready.length} finished and loaded</small></span><em class="g">${ready.length}</em></button>` : ''}
+          </div>
+          <div class="panel anim" style="--i:7"><div class="p-head"><h3>Workshop news</h3><span class="live-dot"></span></div>
+            ${S.log.slice(0, 7).map(l => { const m = chatMsg(l); const who = m.me ? 'You' : m.from;
+              return `<div class="news ${l.kind === 'alert' && !m.me ? 'alert' : ''}"${l.order ? ` data-open="${l.order}"` : ''}><span class="news-av" style="background:${m.me ? 'var(--ink)' : m.sys ? 'var(--metal)' : colorOf(m.from)}">${m.sys ? '⚙' : esc(who.charAt(0))}</span>
+                <div class="grow"><p><b>${esc(who)}</b>${m.sys || m.me ? ' · ' : ' '}${esc(m.sys || m.me ? m.text : m.text.charAt(0).toLowerCase() + m.text.slice(1))}</p><small>${ago(l.at)}</small></div></div>`; }).join('') || '<p class="empty">News from the workshop will appear here.</p>'}
+          </div>
+        </div>
+      </div>`;
+    prevStats = st;
+    return html;
+  }
+
+  function settingsModal(){
+    openModal(`<div id="setModal">
+      <h2>Settings</h2>
+      <p class="section-title" style="margin-top:6px">🔊 Voice</p>
+      <p class="sub" style="margin-bottom:10px">The phone reads workshop news out loud while this app is open.</p>
+      <div class="seg-pick">${['en','sw','off'].map(l => `<button type="button" data-vlang="${l}" class="${VOICE.lang === l ? 'on' : ''}">${l === 'en' ? 'English' : l === 'sw' ? 'Kiswahili' : 'Off'}</button>`).join('')}</div>
+      ${VOICE.lang !== 'off' && voicesFor(VOICE.lang).length ? `<label class="field" style="margin-top:12px"><span>Which voice</span><select id="vName">${voicesFor(VOICE.lang).map(v => `<option value="${esc(v.name)}" ${pickVoice(VOICE.lang) === v ? 'selected' : ''}>${esc(v.name.replace(/^Microsoft /,'').replace(/ - .*$/,'').replace(/ Online \(Natural\)/,' (natural)'))} · ${esc(v.lang)}</option>`).join('')}</select></label>` : ''}
+      <label style="display:flex;gap:8px;align-items:center;margin:12px 0"><input type="checkbox" id="vSmall" ${VOICE.small ? 'checked' : ''} style="accent-color:var(--green);width:18px;height:18px"> Also read small updates (job finished, worker waiting)</label>
+      <button class="btn line" id="vTest">Test voice</button>
+      <p class="section-title">📱 On your phone</p>
+      <p class="sub" style="margin-bottom:0">You stay signed in on this phone. To get an app icon: open the browser menu (⋮) and tap <b>Add to Home screen</b>.</p>
+      <div class="actions" style="justify-content:space-between;margin-top:22px"><button class="btn line" id="outBtn2" style="color:var(--red)">Sign out of this phone</button><button class="btn" data-x>Done</button></div>
+    </div>`);
   }
 
   function pipe(o){
@@ -150,19 +266,28 @@
   }
 
   function viewOrders(){
-    const active = S.orders.filter(o => !o.delivered).sort((a,b) => URG[a.urgency] - URG[b.urgency] || a.deadline - b.deadline);
+    const active = S.orders.filter(o => !o.delivered)
+      .filter(o => orderFilter === 'late' ? !orderProgress(o).finished && isLate(o.deadline) : orderFilter === 'urgent' ? !orderProgress(o).finished && o.urgency === 'urgent' : true)
+      .sort((a,b) => URG[a.urgency] - URG[b.urgency] || a.deadline - b.deadline);
     const delivered = S.orders.filter(o => o.delivered);
     const row = o => { const p = orderProgress(o); const late = !p.finished && isLate(o.deadline);
       return `<button class="order" data-open="${o.id}">
-        <div><div class="ref">${o.ref} <span class="pill p-${o.urgency}">${URG_NAME[o.urgency]}</span></div><div style="color:var(--muted);font-size:13px">${o.qty} × ${esc(o.item)} · ${esc(o.customer)}</div></div>
+        <div><div class="ref">${o.ref} <span class="pill p-${o.urgency}">${URG_NAME[o.urgency]}</span>${o.srcNo ? ` <span class="pill p-web">🌐 ${esc(o.srcNo)}</span>` : ''}</div><div style="color:var(--muted);font-size:13px">${o.qty} × ${esc(o.item)} · ${esc(o.customer)}</div></div>
         ${pipe(o)}
         <div class="due ${late && !o.delivered ? 'late' : ''}">${o.delivered ? 'Delivered' : p.finished ? '<span class="pill p-done">Ready</span>' : 'Due ' + fmtDay(o.deadline)}</div>
       </button>`; };
+    const web = waitingWeb();
     return `
+      ${web.length ? `<div class="webbox"><p class="section-title" style="margin-top:0">🌐 New from the website · ${web.length}</p>
+        <div class="list">${web.map(w => `<button class="order webrow" data-web="${w.id}">
+          <div><div class="ref">${esc(w.order_no)}</div><div style="color:var(--muted);font-size:13px">${esc(w.customer_name)} · ${ago(new Date(w.created_at).getTime())}</div></div>
+          <div class="webitems">${(w.items || []).map(i => `${i.qty} × ${esc(i.name)}`).join('<br>')}</div>
+          <span class="btn sm">Send to workshop</span></button>`).join('')}</div></div>` : ''}
       <h2>Orders</h2>
       <p class="sub">Most urgent first. Tap an order to see who's on it.</p>
-      <div class="list">${active.length ? active.map(row).join('') : '<p class="empty">No open orders. Tap <b>+ New order</b> to add one.</p>'}</div>
-      ${delivered.length ? `<p class="section-title">Delivered (last 30 days)</p><div class="list">${delivered.map(row).join('')}</div>` : ''}`;
+      ${orderFilter ? `<p class="filter">Showing only <b>${orderFilter}</b> orders <button id="clearFilter">Show all ✕</button></p>` : ''}
+      <div class="list">${active.length ? active.map(row).join('') : `<p class="empty">${orderFilter ? 'None right now. ✓' : 'No open orders. Tap <b>+ New order</b> to add one.'}</p>`}</div>
+      ${delivered.length && !orderFilter ? `<p class="section-title">Delivered (last 30 days)</p><div class="list">${delivered.map(row).join('')}</div>` : ''}`;
   }
 
   function viewWorkshop(){
@@ -189,31 +314,63 @@
 
   function viewWorkers(){
     const row = w => { const [k, l] = workerStatus(w); const t = w.task && T(w.task); const o = t && O(t.order);
-      return `<div class="item"><div class="grow"><div class="t">${esc(w.name)} <span class="pill p-${k}">${l}</span>${w.locked ? ' <span class="pill p-attention">Locked out</span>' : ''}</div>
+      return `<div class="item"><div class="grow"><div class="t">${esc(w.name)} <span class="pill p-${k}">${l}</span></div>
         <div class="s">${stageName(w.stage)}${o ? ` · on ${o.ref}` : ''}</div></div>
         <button class="btn sm line" data-editw="${w.id}">Edit</button></div>`; };
     return `
       <div style="display:flex;justify-content:space-between;align-items:end;gap:12px;flex-wrap:wrap"><div><h2>Workers</h2>
-      <p class="sub" style="margin-bottom:0">Each worker signs in on the workshop computer (<a href="station.html">station.html</a>) with their own PIN.</p></div>
+      <p class="sub" style="margin-bottom:0">On the workshop screen (<a href="station.html">station.html</a>) each worker taps their name to see their job.</p></div>
       <button class="btn" data-addw>+ Add worker</button></div>
+      <div class="fm-card anim"><span class="fm-ic">🔑</span><div class="grow"><b>Foreman code</b><p>${S.hasCode ? 'Set. The foreman uses it on the workshop screen to tick tools and materials.' : 'Not set yet. The foreman needs it to open his page on the workshop screen.'}</p></div><button class="btn ${S.hasCode ? 'line' : ''}" data-fmcode>${S.hasCode ? 'Change code' : 'Set code'}</button></div>
       ${STAGES.map(s => { const ws = S.workers.filter(w => w.stage === s.id); return `<p class="section-title">${s.name}</p>
         <div class="list">${ws.length ? ws.map(row).join('') : '<p class="empty">No one in this step yet.</p>'}</div>`; }).join('')}`;
+  }
+
+  function waitingWeb(){
+    const linked = new Set(S.orders.map(o => o.src).filter(Boolean));
+    return (S.web || []).filter(w => !linked.has(w.id));
+  }
+
+  function countUp(el){
+    const to = +el.dataset.count, from = +el.dataset.from || 0;
+    if (to === from || matchMedia('(prefers-reduced-motion: reduce)').matches){ el.textContent = to; return; }
+    const t0 = performance.now(), dur = 700;
+    const step = t => { const k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3); el.textContent = Math.round(from + (to - from) * e); if (k < 1) requestAnimationFrame(step); };
+    requestAnimationFrame(step);
   }
 
   function render(){
     document.querySelectorAll('.tabs [data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
     const n = attention().filter(a => a.lvl === 'red').length;
     $('#attnBadge').textContent = n || ''; $('#attnBadge').style.display = n ? '' : 'none';
-    $('#view').innerHTML = tab === 'today' ? viewToday() : tab === 'orders' ? viewOrders() : tab === 'workers' ? viewWorkers() : viewWorkshop();
+    const v = $('#view');
+    v.innerHTML = tab === 'today' ? viewToday() : tab === 'orders' ? viewOrders() : tab === 'workers' ? viewWorkers() : tab === 'stock' ? viewStock() : viewWorkshop();
+    v.classList.toggle('enter', enter);
+    if (enter){ v.querySelectorAll('[data-count]').forEach(countUp); }
+    else v.querySelectorAll('.kpi.pop [data-count]').forEach(countUp);
+    enter = false;
   }
 
   /* ---------- clicks ---------- */
   document.addEventListener('click', async e => {
     if (e.target.closest('[data-addw]')) return workerModal();
+    const wb = e.target.closest('[data-web]'); if (wb) return webModal(wb.dataset.web);
+    const gb = e.target.closest('[data-go]'); if (gb){ const [t, f] = gb.dataset.go.split(':'); tab = t; orderFilter = f || null; enter = true; render(); window.scrollTo(0,0); return; }
+    const mvb = e.target.closest('[data-move]'); if (mvb) return moveModal(mvb.dataset.move, mvb.dataset.mat);
+    const cb = e.target.closest('[data-cnt]'); if (cb) return countModal(cb.dataset.cnt);
+    if (e.target.closest('[data-addmat]')) return materialModal();
+    if (e.target.closest('[data-addtool]')) return toolModal();
+    if (e.target.closest('[data-fmcode]')) return fmCodeModal();
+    const et = e.target.closest('[data-edittool]'); if (et) return toolModal(et.dataset.edittool);
+    const tf = e.target.closest('[data-toolfound]'); if (tf){ tf.disabled = true; return act('ws_tool_found', { p_tool: tf.dataset.toolfound }, 'Marked as back'); }
+    const em = e.target.closest('[data-editmat]'); if (em) return materialModal(em.dataset.editmat);
+    const sb = e.target.closest('[data-std]'); if (sb) return stdModal(sb.dataset.std);
+    if (e.target.closest('#clearFilter')){ orderFilter = null; enter = true; render(); return; }
+    if (e.target.closest('#sideSet') || e.target.closest('#mSet')) return settingsModal();
     const ew = e.target.closest('[data-editw]'); if (ew) return workerModal(ew.dataset.editw);
     const b = e.target.closest('[data-tabgo],[data-open],[data-solve],[data-deliver],[data-up],[data-down]');
     if (!b) return;
-    if (b.dataset.tabgo){ closeModal(); tab = b.dataset.tabgo; render(); window.scrollTo(0,0); }
+    if (b.dataset.tabgo){ closeModal(); tab = b.dataset.tabgo; orderFilter = null; enter = true; render(); window.scrollTo(0,0); }
     else if (b.dataset.open) orderModal(b.dataset.open);
     else if (b.dataset.solve){ b.disabled = true; closeModal(); await act('ws_solve', { p_task: b.dataset.solve }, 'Marked solved'); }
     else if (b.dataset.deliver){ b.disabled = true; closeModal(); await act('ws_deliver', { p_order: b.dataset.deliver }, 'Marked delivered'); }
@@ -259,6 +416,40 @@
     setTimeout(() => s.querySelector('#fCust').focus(), 50);
   }
 
+  function webModal(id){
+    const w = (S.web || []).find(x => x.id === id); if (!w) return;
+    const d = new Date(); d.setDate(d.getDate() + 7);
+    const items = w.items || [];
+    const s = openModal(`
+      <div style="display:flex;justify-content:space-between;align-items:start;gap:10px"><div><h2 style="margin:0">${esc(w.order_no)}</h2><p class="sub" style="margin:2px 0 0">From the website · ${ago(new Date(w.created_at).getTime())}</p></div><span class="pill p-web">🌐 Website</span></div>
+      <div class="webcust">
+        <b>${esc(w.customer_name)}</b>${w.phone ? ` · <a href="tel:${esc(w.phone)}">${esc(w.phone)}</a>` : ''}<br>
+        <span style="color:var(--muted)">${esc(w.fulfilment || '')}${w.delivery_location ? ' · ' + esc(w.delivery_location) : ''}</span>
+        ${w.notes ? `<p style="margin:8px 0 0">📝 ${esc(w.notes)}</p>` : ''}
+      </div>
+      <div class="field"><span>What they ordered</span><div class="weblist">${items.map(i => `<div><b>${i.qty} ×</b> ${esc(i.name)}${i.finish ? ` <span style="color:var(--muted)">(${esc(i.finish)})</span>` : ''}</div>`).join('')}</div>
+        <small style="color:var(--muted)">${items.length > 1 ? `Each line becomes its own job in the workshop (${items.length} jobs).` : 'This becomes one job in the workshop.'}</small></div>
+      <label class="field"><span>Deadline</span><input id="wDate" type="date" value="${d.toLocaleDateString('en-CA')}"></label>
+      <div class="field"><span>How urgent</span><div class="seg-pick" id="wUrg">
+        <button type="button" data-u="normal" class="on">Normal</button><button type="button" data-u="high">High</button><button type="button" data-u="urgent">Urgent</button></div></div>
+      <div class="field"><span>Steps it needs</span><div class="checks">${STAGES.map(st => `<label><input type="checkbox" value="${st.id}" checked> ${st.name}</label>`).join('')}</div></div>
+      <label class="field"><span>Note for the workshop (optional)</span><textarea id="wNote" rows="2" placeholder="e.g. Black frames, red seats."></textarea></label>
+      <p style="font-size:13px;color:var(--muted);margin:0">The customer's tracking page will show each step live as the workers finish them.</p>
+      <p id="wErr" style="color:var(--red);min-height:20px;font-size:13px"></p>
+      <div class="actions"><button class="btn line" data-x>Not now</button><button class="btn" id="wSave">Send to workshop</button></div>`);
+    let urg = 'normal';
+    s.querySelector('#wUrg').addEventListener('click', e => { const b = e.target.closest('[data-u]'); if (!b) return; urg = b.dataset.u; s.querySelectorAll('#wUrg button').forEach(x => x.classList.toggle('on', x === b)); });
+    s.querySelector('#wSave').onclick = async () => {
+      const stages = [...s.querySelectorAll('.checks input:checked')].map(x => x.value);
+      if (!stages.length) return s.querySelector('#wErr').textContent = 'Pick at least one step.';
+      const btn = s.querySelector('#wSave'); btn.disabled = true; btn.textContent = 'Sending…';
+      const { data, error } = await db.rpc('ws_from_website', { p: { order_id: w.id, stages, deadline: s.querySelector('#wDate').value || null, urgency: urg, notes: s.querySelector('#wNote').value.trim() } });
+      if (error){ btn.disabled = false; btn.textContent = 'Send to workshop'; s.querySelector('#wErr').textContent = errMsg(error); return; }
+      closeModal(); tab = 'orders'; await load();
+      toast(`${w.order_no} is in the workshop as ${data}`);
+    };
+  }
+
   function orderModal(id){
     const o = O(id); if (!o) return; const p = orderProgress(o);
     const ts = o.stages.map(st => S.tasks.find(t => t.order === o.id && t.stage === st)).filter(Boolean);
@@ -266,9 +457,13 @@
     openModal(`
       <div style="display:flex;justify-content:space-between;align-items:start;gap:10px"><div><h2 style="margin:0">${o.ref}</h2><p class="sub" style="margin:2px 0 0">${esc(o.customer)}</p></div><span class="pill p-${o.urgency}">${URG_NAME[o.urgency]}</span></div>
       <p style="margin:14px 0 4px;font-size:17px"><b>${o.qty} × ${esc(o.item)}</b></p>
+      ${o.srcNo ? `<p style="margin:4px 0;font-size:13px;color:var(--muted)">🌐 Website order ${esc(o.srcNo)} · the customer sees these steps live on their tracking page</p>` : ''}
       ${o.notes ? `<p style="margin:6px 0;padding:10px 12px;background:#fff;border:1px solid var(--line);border-radius:6px">📝 ${esc(o.notes)}</p>` : ''}
       <p class="${!p.finished && isLate(o.deadline) ? 'due late' : ''}" style="text-align:left">Deadline: ${fmtDay(o.deadline)}</p>
       <div style="margin:14px 0">${pipe(o)}</div>
+      ${(() => { const use = orderUse(o); return use.length ? `<p class="section-title">Materials</p><div class="steps">${use.map(r => { const m = M(r.mat);
+        return `<div class="step"><div style="flex:1"><b>${esc(m.name)}</b><div style="color:var(--muted);font-size:13px">Given ${n2(r.given)} ${esc(m.unit)}${r.normal != null ? ` · normal ${n2(r.normal)} ${esc(m.unit)}` : ''}</div></div>${r.over ? '<span class="pill p-attention">More than normal</span>' : r.normal != null ? '<span class="pill p-working">OK</span>' : ''}</div>`; }).join('')}</div>` : ''; })()}
+      <p class="section-title">Steps</p>
       <div class="steps">${ts.map(t => { const [k, l] = lbl(t); const w = t.worker && W(t.worker); return `<div class="step"><div style="flex:1"><b>${stageName(t.stage)}</b><div style="color:var(--muted);font-size:13px">${w ? esc(w.name) : 'Not given to anyone yet'}${t.problem ? ` · ⚠ ${esc(t.problem.reason)}` : ''}</div></div><span class="pill p-${k}">${l}</span>${t.problem ? `<button class="btn sm" data-solve="${t.id}">Solved</button>` : ''}</div>`; }).join('')}</div>
       ${!o.delivered && o.urgency !== 'urgent' && !p.finished ? `<p style="margin-top:14px;font-size:13px;color:var(--muted)">Customer pushing? Make it urgent and it jumps to the front of every line. No one's current job gets interrupted.</p>` : ''}
       <div class="actions">
@@ -280,6 +475,202 @@
     if (u) u.onclick = async () => { u.disabled = true; closeModal(); await act('ws_make_urgent', { p_order: o.id }, `${o.ref} is now urgent`); };
   }
 
+  /* =====================================================================
+     STOCK: raw materials. Only the owner changes stock.
+     ===================================================================== */
+  const M = id => S.mats.find(m => m.id === id);
+  const n2 = x => (Math.round(x * 100) / 100).toLocaleString('en-KE');
+  const prodKey = p => String(p || '').replace(/\s*\(.*\)\s*$/, '').trim().toLowerCase();
+  // given (out minus returned) per order + material, and the normal amount
+  function orderUse(o){
+    const by = {};
+    S.moves.filter(x => x.order === o.id && (x.kind === 'out' || x.kind === 'back')).forEach(x => { by[x.mat] = (by[x.mat] || 0) - x.qty; });
+    S.std.filter(s => s.product === prodKey(o.item)).forEach(s => { if (!(s.mat in by)) by[s.mat] = 0; });
+    return Object.entries(by).map(([mat, given]) => { const s = S.std.find(z => z.product === prodKey(o.item) && z.mat === mat);
+      const normal = s ? s.per * o.qty : null; return { mat, given, normal, over: normal != null && given > normal * 1.1 }; })
+      .filter(r => M(r.mat));
+  }
+  function watchList(){
+    const out = [];
+    S.orders.forEach(o => orderUse(o).filter(r => r.over).forEach(r => { const m = M(r.mat);
+      out.push({ lvl:'red', title:`${o.ref}: ${Math.round(100 * (r.given - r.normal) / r.normal)}% more ${m.name} than normal`, sub:`Given ${n2(r.given)} ${m.unit}, normal for ${o.qty} × ${o.item} is ${n2(r.normal)} ${m.unit}`, order:o.id }); }));
+    S.moves.filter(x => x.kind === 'count' && x.qty < 0 && Date.now() - x.at < 30 * 864e5).forEach(x => { const m = M(x.mat); if (!m) return;
+      out.push({ lvl:'red', title:`${n2(-x.qty)} ${m.unit} of ${m.name} missing`, sub:`Found at the store count · ${ago(x.at)}` }); });
+    return out;
+  }
+  /* ---------- TOOLS: evening check by the foreman ---------- */
+  const TL = id => S.tools.find(t => t.id === id);
+  const todayStr = () => new Date().toLocaleDateString('en-CA', { timeZone:'Africa/Nairobi' });
+  const checkDue = () => { const [h, m] = (KT_CONFIG.toolCheckAt || '18:30').split(':').map(Number);
+    const n = new Date(new Date().toLocaleString('en-US', { timeZone:'Africa/Nairobi' })); return n.getHours() * 60 + n.getMinutes() >= h * 60 + m + 15; };
+  const openMissing = () => S.toolMissing.filter(x => !x.found);
+  function toolsPanel(){
+    const done = S.toolChecks.find(c => c.day === todayStr());
+    const miss = openMissing();
+    const since = Date.now() - 30 * 864e5;
+    const per = {}; S.toolMissing.filter(x => new Date(x.since).getTime() >= since && x.worker).forEach(x => { per[x.worker] = (per[x.worker] || 0) + 1; });
+    const status = done ? (done.missing ? `<span class="hp h-late">Tonight: ${done.missing} missing</span>` : `<span class="hp h-ready">Tonight: all back ✓</span>`)
+      : `<span class="hp ${checkDue() ? 'h-risk' : 'h-track'}">Tonight's check: ${checkDue() ? 'not done yet' : 'at ' + (KT_CONFIG.toolCheckAt || '18:30')}</span>`;
+    return `<div class="panel anim tools" style="--i:1"><div class="p-head"><h3>🔧 Tools</h3><span class="st-btns">${status}<button class="link" data-addtool>+ Add tool</button></span></div>
+      <p class="sub" style="font-size:13px;margin-bottom:6px">The foreman ticks who takes which tool on the workshop screen (Foreman page) and checks them all at ${KT_CONFIG.toolCheckAt || '18:30'}.</p>
+      ${S.tools.filter(t => t.active).length ? `<div class="tool-grid">${S.tools.filter(t => t.active).map(t => { const m = miss.find(x => x.tool === t.id); const w = t.worker && W(t.worker);
+        return `<div class="tool ${m ? 'missing' : ''}"><button class="tool-name" data-edittool="${t.id}"><b>${esc(t.name)}</b><small>${w ? 'Normally ' + esc(w.name) : 'Anyone'}</small></button>
+          ${!m && S.loans.find(l => l.tool === t.id) ? (() => { const l = S.loans.find(z => z.tool === t.id), lw = W(l.worker); return `<span class="tool-out">With ${esc(lw ? lw.name : 'someone')}<small>since ${new Date(l.at).toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' })}</small></span>`; })() : ''}
+          ${m ? `<span class="tool-st">Missing since ${fmtDay(new Date(m.since + 'T12:00')).replace(/^(Today|Yesterday)$/, x => x.toLowerCase())}</span><button class="btn sm" data-toolfound="${t.id}">It's back</button>` : S.loans.find(l => l.tool === t.id) ? '' : '<span class="tool-ok">✓ In</span>'}</div>`; }).join('')}</div>`
+        : '<p class="empty">No tools yet. Add each one with its painted number, e.g. "Grinder 1", "Grinder 2", "Welding machine".</p>'}
+      ${Object.keys(per).length ? `<p class="tool-hist"><b>Missing in the last 30 days:</b> ${Object.entries(per).sort((a,b) => b[1] - a[1]).map(([wid, c]) => `${esc((W(wid) || {}).name || 'Unknown')} ${c}×`).join(' · ')}</p>` : ''}
+    </div>`;
+  }
+  function fmCodeModal(){
+    const s = openModal(`<h2>Foreman code</h2><p class="sub">4 numbers. Tell the foreman in person. Change it any time, e.g. if the foreman changes.</p>
+      <label class="field"><span>New code</span><input id="fcPin" inputmode="numeric" maxlength="4" placeholder="e.g. 4821" autocomplete="off" style="font-size:24px;letter-spacing:.3em"></label>
+      <p id="fcErr" class="ferr"></p>
+      <div class="actions"><button class="btn line" data-x>Cancel</button><button class="btn" id="fcSave">Save code</button></div>`);
+    s.querySelector('#fcSave').onclick = async () => { const pin = s.querySelector('#fcPin').value.trim();
+      if (!/^\d{4}$/.test(pin)) return s.querySelector('#fcErr').textContent = 'The code must be exactly 4 numbers.';
+      const { error } = await db.rpc('ws_set_foreman_pin', { p_pin: pin });
+      if (error) return s.querySelector('#fcErr').textContent = errMsg(error);
+      closeModal(); toast('Foreman code saved'); await load(); };
+    setTimeout(() => s.querySelector('#fcPin').focus(), 50);
+  }
+  function toolModal(id){
+    const t = id ? TL(id) : null;
+    const s = openModal(`<h2>${t ? 'Edit ' + esc(t.name) : 'Add a tool'}</h2>
+      <label class="field"><span>Name (use the number painted on it)</span><input id="tName" value="${t ? esc(t.name) : ''}" placeholder="e.g. Grinder 1" autocomplete="off"></label>
+      <label class="field"><span>Who normally uses it</span><select id="tWho"><option value="">Anyone</option>${S.workers.filter(w => w.active).map(w => `<option value="${w.id}" ${t && t.worker === w.id ? 'selected' : ''}>${esc(w.name)} · ${stageName(w.stage)}</option>`).join('')}</select></label>
+      <p id="tErr" class="ferr"></p>
+      <div class="actions" style="justify-content:space-between">${t ? '<button class="btn line" id="tOff" style="color:var(--c-late)">Remove tool</button>' : '<span></span>'}<span style="display:flex;gap:8px"><button class="btn line" data-x>Cancel</button><button class="btn" id="tSave">Save</button></span></div>`);
+    const save = async extra => { const { error } = await db.rpc('ws_save_tool', { p: Object.assign({ id: t ? t.id : null, name: s.querySelector('#tName').value, usual_worker: s.querySelector('#tWho').value }, extra || {}) });
+      if (error){ s.querySelector('#tErr').textContent = errMsg(error); return; } closeModal(); toast('Saved'); await load(); };
+    s.querySelector('#tSave').onclick = () => save();
+    const off = s.querySelector('#tOff'); if (off) off.onclick = () => save({ active:false });
+    setTimeout(() => s.querySelector('#tName').focus(), 50);
+  }
+
+  function viewStock(){
+    const mats = S.mats.filter(m => m.active);
+    const watch = watchList();
+    const moveTxt = x => { const m = M(x.mat), w = x.worker && W(x.worker), o = x.order && O(x.order); if (!m) return '';
+      return x.kind === 'in' ? `Received <b>${n2(x.qty)} ${m.unit}</b> ${esc(m.name)}${x.note ? ' · ' + esc(x.note) : ''}`
+        : x.kind === 'out' ? `Gave <b>${n2(-x.qty)} ${m.unit}</b> ${esc(m.name)} to ${esc(w ? w.name : 'a worker')}${o ? ' for ' + o.ref : ''}`
+        : x.kind === 'back' ? `${esc(w ? w.name : 'A worker')} returned <b>${n2(x.qty)} ${m.unit}</b> ${esc(m.name)}`
+        : `Count: ${esc(m.name)} ${x.qty === 0 ? 'correct ✓' : x.qty < 0 ? `<b style="color:var(--c-late)">${n2(-x.qty)} ${m.unit} missing</b>` : `${n2(x.qty)} ${m.unit} extra`}`; };
+    const stdByProd = {};
+    S.std.forEach(s => (stdByProd[s.product] = stdByProd[s.product] || []).push(s));
+    return `
+      <div class="d-head anim" style="--i:0"><div><h1>Stock &amp; tools</h1><p class="sub" style="margin:0">Raw materials in the store and the workshop tools. Only you can change these.</p></div>
+        <span class="st-btns"><button class="btn line" data-addmat>+ Add material</button><button class="btn" data-move="out">Give out</button></span></div>
+      ${watch.length ? `<div class="panel watch anim" style="--i:1"><div class="p-head"><h3>⚠ Watch list <span class="count">${watch.length}</span></h3></div>
+        ${watch.map(a => `<div class="need red"${a.order ? ` data-open="${a.order}"` : ''}><span class="need-dot"></span><div class="grow"><b>${esc(a.title)}</b><p>${esc(a.sub)}</p></div></div>`).join('')}</div>` : ''}
+      ${toolsPanel()}
+      <p class="section-title anim" style="--i:2">Materials</p>
+      ${mats.length ? `<div class="mats">${mats.map((m, i) => { const low = m.low > 0 && m.store <= m.low; const full = Math.max(m.low * 3, m.store, 1);
+        return `<div class="mat anim ${low ? 'low' : ''}" style="--i:${i + 2}">
+          <button class="mat-name" data-editmat="${m.id}"><b>${esc(m.name)}</b>${low ? '<span class="hp h-late">Low</span>' : ''}</button>
+          <p class="mat-qty"><b>${n2(m.store)}</b> ${esc(m.unit)}</p>
+          <div class="mat-bar"><i style="width:${Math.min(100, 100 * m.store / full)}%"></i>${m.low > 0 ? `<em style="left:${100 * m.low / full}%"></em>` : ''}</div>
+          <p class="mat-low">${m.low > 0 ? `Warns at ${n2(m.low)} ${esc(m.unit)}` : 'No low-stock warning set'}</p>
+          <div class="mat-acts"><button data-move="in" data-mat="${m.id}">＋ Received</button><button data-move="out" data-mat="${m.id}">Give out</button><button data-move="back" data-mat="${m.id}">Returned</button><button data-cnt="${m.id}">Count</button></div>
+        </div>`; }).join('')}</div>`
+      : `<div class="panel anim" style="--i:1"><p class="empty">No materials yet. Tap <b>+ Add material</b>, e.g. "Steel tube 1 inch" in metres, "Foam sheet" in sheets.</p></div>`}
+      <div class="d-grid" style="margin-top:20px">
+        <div class="panel anim" style="--i:8"><div class="p-head"><h3>Recent movements</h3></div>
+          ${S.moves.slice(0, 15).map(x => `<div class="news"><span class="news-av" style="background:${x.kind === 'out' ? 'var(--c-urg)' : x.kind === 'count' ? (x.qty < 0 ? 'var(--c-late)' : 'var(--metal)') : 'var(--c-work)'}">${x.kind === 'in' ? '＋' : x.kind === 'out' ? '−' : x.kind === 'back' ? '↩' : '#'}</span><div class="grow"><p>${moveTxt(x)}</p><small>${ago(x.at)}</small></div></div>`).join('') || '<p class="empty">Nothing yet.</p>'}
+        </div>
+        <div class="panel anim" style="--i:9"><div class="p-head"><h3>Normal amount per piece</h3><button class="link" data-std>+ Add</button></div>
+          <p class="sub" style="font-size:13px;margin-bottom:8px">Tell the app how much one piece normally takes. If an order is given more, you get an alert.</p>
+          ${Object.keys(stdByProd).length ? Object.entries(stdByProd).map(([p, list]) => `<div class="std"><b>${esc(p.charAt(0).toUpperCase() + p.slice(1))}</b>${list.map(s => { const m = M(s.mat); return m ? `<button data-std="${esc(p)}|${s.mat}">${n2(s.per)} ${esc(m.unit)} ${esc(m.name)}</button>` : ''; }).join('')}</div>`).join('')
+            : '<p class="empty">Not set yet. Example: Bar stool = 2 m Steel tube.</p>'}
+        </div>
+      </div>`;
+  }
+
+  function materialModal(id){
+    const m = id ? M(id) : null;
+    const s = openModal(`<h2>${m ? 'Edit ' + esc(m.name) : 'Add a material'}</h2>
+      <label class="field"><span>Name</span><input id="mName" value="${m ? esc(m.name) : ''}" placeholder="e.g. Steel tube 1 inch" autocomplete="off"></label>
+      <div class="row2"><label class="field"><span>Counted in</span><input id="mUnit" value="${m ? esc(m.unit) : ''}" placeholder="m, sheets, pcs, litres" list="units"></label>
+      <label class="field"><span>Warn me when it's down to</span><input id="mLow" type="number" min="0" step="any" value="${m ? m.low : ''}" placeholder="e.g. 20"></label></div>
+      <div class="field"><span>Used in which steps (the foreman only sees it for these workers)</span><div class="checks">${STAGES.map(st => `<label><input type="checkbox" class="mStage" value="${st.id}" ${m && m.stages.includes(st.id) ? 'checked' : ''}> ${st.name}</label>`).join('')}</div></div>
+      <datalist id="units"><option>m</option><option>pcs</option><option>sheets</option><option>litres</option><option>kg</option><option>rolls</option></datalist>
+      ${m ? '' : '<p class="sub" style="font-size:13px">Starts at 0. Then tap <b>Received</b> to add what is in the store now.</p>'}
+      <p id="mErr" class="ferr"></p>
+      <div class="actions"><button class="btn line" data-x>Cancel</button><button class="btn" id="mSave">Save</button></div>`);
+    s.querySelector('#mSave').onclick = async () => { const b = s.querySelector('#mSave'); b.disabled = true;
+      const { error } = await db.rpc('ws_save_material', { p: { id: m ? m.id : null, name: s.querySelector('#mName').value, unit: s.querySelector('#mUnit').value, low_at: s.querySelector('#mLow').value || 0, stages: [...s.querySelectorAll('.mStage:checked')].map(x => x.value) } });
+      if (error){ b.disabled = false; s.querySelector('#mErr').textContent = errMsg(error); return; }
+      closeModal(); toast('Saved'); await load(); };
+    setTimeout(() => s.querySelector('#mName').focus(), 50);
+  }
+
+  function moveModal(kind, matId){
+    if (!S.mats.length) return materialModal();
+    const T_ = { in:['Received','Add a delivery to the store'], out:['Give out','Materials leaving the store'], back:['Returned','Leftovers brought back to the store'] }[kind];
+    const open = S.orders.filter(o => !o.delivered && !orderProgress(o).finished);
+    const s = openModal(`<h2>${T_[0]}</h2><p class="sub">${T_[1]}</p>
+      <label class="field"><span>Material</span><select id="vMat">${S.mats.filter(m => m.active).map(m => `<option value="${m.id}" ${m.id === matId ? 'selected' : ''}>${esc(m.name)} · ${n2(m.store)} ${esc(m.unit)} in store</option>`).join('')}</select></label>
+      <label class="field"><span>How much</span><div class="qty-in"><input id="vQty" type="number" min="0" step="any" inputmode="decimal"><em id="vUnit"></em></div></label>
+      ${kind !== 'in' ? `<label class="field"><span>${kind === 'out' ? 'Who is taking it' : 'Who brought it back'}</span><select id="vWho"><option value="">Pick a worker</option>${S.workers.filter(w => w.active).map(w => `<option value="${w.id}">${esc(w.name)} · ${stageName(w.stage)}</option>`).join('')}</select></label>
+      <label class="field"><span>For which order</span><select id="vOrd"><option value="">Not for a specific order</option>${open.map(o => `<option value="${o.id}">${o.ref} · ${o.qty} × ${esc(o.item)}</option>`).join('')}</select></label>
+      <p class="hint2" id="vHint"></p>` : `<label class="field"><span>Note (optional)</span><input id="vNote" placeholder="e.g. From Gikomba supplier, invoice 234"></label>`}
+      <p id="vErr" class="ferr"></p>
+      <div class="actions"><button class="btn line" data-x>Cancel</button><button class="btn" id="vSave">${T_[0]}</button></div>`);
+    const upd = () => { const m = M(s.querySelector('#vMat').value); s.querySelector('#vUnit').textContent = m ? m.unit : '';
+      const h = s.querySelector('#vHint'); if (!h) return;
+      const w = s.querySelector('#vWho').value; const ws = w && W(w);
+      if (ws && kind === 'out' && !s.querySelector('#vOrd').value){ const t = ws.task && T(ws.task); if (t) s.querySelector('#vOrd').value = t.order; }
+      const o = O(s.querySelector('#vOrd').value);
+      if (o && m){ const r = orderUse(o).find(x => x.mat === m.id); const q = parseFloat(s.querySelector('#vQty').value) || 0;
+        h.innerHTML = r && r.normal != null ? `${o.ref} has had <b>${n2(r.given)} ${esc(m.unit)}</b> so far. Normal for the whole order: <b>${n2(r.normal)} ${esc(m.unit)}</b>.${kind === 'out' && r.given + q > r.normal * 1.1 ? ' <span style="color:var(--c-late);font-weight:600">This is more than normal.</span>' : ''}`
+          : r ? `${o.ref} has had <b>${n2(r.given)} ${esc(m.unit)}</b> of this so far.` : ''; }
+      else h.innerHTML = ''; };
+    s.addEventListener('input', upd); s.addEventListener('change', upd); upd();
+    s.querySelector('#vSave').onclick = async () => { const b = s.querySelector('#vSave'); b.disabled = true;
+      const p = { kind, material_id: s.querySelector('#vMat').value, qty: s.querySelector('#vQty').value,
+        worker_id: s.querySelector('#vWho') ? s.querySelector('#vWho').value : null, order_id: s.querySelector('#vOrd') ? s.querySelector('#vOrd').value : null,
+        note: s.querySelector('#vNote') ? s.querySelector('#vNote').value : null };
+      const { error } = await db.rpc('ws_stock_move', { p });
+      if (error){ b.disabled = false; s.querySelector('#vErr').textContent = errMsg(error); return; }
+      closeModal(); toast('Saved'); await load(); };
+    setTimeout(() => s.querySelector('#vQty').focus(), 50);
+  }
+
+  function countModal(matId){
+    const m = M(matId); if (!m) return;
+    const s = openModal(`<h2>Count ${esc(m.name)}</h2>
+      <p class="sub">Go to the store and count what is really there. The app says there should be <b>${n2(m.store)} ${esc(m.unit)}</b>.</p>
+      <label class="field"><span>What you counted</span><div class="qty-in"><input id="cQty" type="number" min="0" step="any" inputmode="decimal"><em>${esc(m.unit)}</em></div></label>
+      <p class="hint2" id="cHint"></p><p id="cErr" class="ferr"></p>
+      <div class="actions"><button class="btn line" data-x>Cancel</button><button class="btn" id="cSave">Save count</button></div>`);
+    s.querySelector('#cQty').addEventListener('input', e => { const v = parseFloat(e.target.value); const d = isNaN(v) ? null : v - m.store;
+      s.querySelector('#cHint').innerHTML = d == null ? '' : d < 0 ? `<span style="color:var(--c-late);font-weight:600">${n2(-d)} ${esc(m.unit)} missing</span>` : d > 0 ? `${n2(d)} ${esc(m.unit)} more than expected` : '✓ Matches'; });
+    s.querySelector('#cSave').onclick = async () => { const b = s.querySelector('#cSave'); b.disabled = true;
+      const { data, error } = await db.rpc('ws_stock_count', { p_material: m.id, p_counted: s.querySelector('#cQty').value });
+      if (error){ b.disabled = false; s.querySelector('#cErr').textContent = errMsg(error); return; }
+      closeModal(); toast(data < 0 ? `${n2(-data)} ${m.unit} missing. Added to the watch list.` : 'Count saved'); await load(); };
+    setTimeout(() => s.querySelector('#cQty').focus(), 50);
+  }
+
+  function stdModal(key){
+    if (!S.mats.length) return materialModal();
+    const [prod, mat] = key ? key.split('|') : ['', ''];
+    const cur = key ? S.std.find(x => x.product === prod && x.mat === mat) : null;
+    const prods = [...new Set(S.orders.map(o => o.item.replace(/\s*\(.*\)\s*$/, '').trim()))];
+    const s = openModal(`<h2>Normal amount per piece</h2>
+      <label class="field"><span>Product</span><input id="sProd" list="prods" value="${esc(prod ? prod.charAt(0).toUpperCase() + prod.slice(1) : '')}" placeholder="e.g. Bar stool" ${key ? 'readonly' : ''}></label>
+      <datalist id="prods">${prods.map(p => `<option>${esc(p)}</option>`).join('')}</datalist>
+      <label class="field"><span>Material</span><select id="sMat" ${key ? 'disabled' : ''}>${S.mats.filter(m => m.active).map(m => `<option value="${m.id}" ${m.id === mat ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></label>
+      <label class="field"><span>One piece normally takes</span><div class="qty-in"><input id="sPer" type="number" min="0" step="any" value="${cur ? cur.per : ''}"><em id="sUnit"></em></div></label>
+      <p id="sErr" class="ferr"></p>
+      <div class="actions" style="justify-content:space-between">${cur ? '<button class="btn line" id="sDel" style="color:var(--c-late)">Remove</button>' : '<span></span>'}<span style="display:flex;gap:8px"><button class="btn line" data-x>Cancel</button><button class="btn" id="sSave">Save</button></span></div>`);
+    const upd = () => { const m = M(s.querySelector('#sMat').value); s.querySelector('#sUnit').textContent = m ? m.unit : ''; };
+    s.querySelector('#sMat').addEventListener('change', upd); upd();
+    const save = async per => { const { error } = await db.rpc('ws_save_std', { p_product: s.querySelector('#sProd').value, p_material: s.querySelector('#sMat').value, p_per_piece: per });
+      if (error){ s.querySelector('#sErr').textContent = errMsg(error); return; } closeModal(); toast('Saved'); await load(); };
+    s.querySelector('#sSave').onclick = () => save(s.querySelector('#sPer').value || 0);
+    const d = s.querySelector('#sDel'); if (d) d.onclick = () => save(0);
+  }
+
   function workerModal(id){
     const w = id ? W(id) : null;
     const s = openModal(`
@@ -287,19 +678,17 @@
       <label class="field"><span>Name</span><input id="wName" value="${w ? esc(w.name) : ''}" placeholder="e.g. Odhiambo" autocomplete="off"></label>
       <label class="field"><span>Works in</span><select id="wStage" ${w && w.task ? 'disabled' : ''}>${STAGES.map(st => `<option value="${st.id}" ${w && w.stage === st.id ? 'selected' : ''}>${st.name}</option>`).join('')}</select>
         ${w && w.task ? '<small style="color:var(--muted)">Can change step once their current job is finished.</small>' : ''}</label>
-      <label class="field"><span>${w ? 'New PIN (leave empty to keep the old one)' : '4-digit PIN'}</span><input id="wPin" inputmode="numeric" maxlength="4" placeholder="e.g. 4821" autocomplete="off"></label>
-      <p style="font-size:13px;color:var(--muted)">Tell the worker their PIN in person. It is stored scrambled, so no one can look it up later, not even you. Forgotten PIN? Just set a new one.</p>
+      <p style="font-size:13px;color:var(--muted)">They go in on the workshop screen by tapping their name.</p>
       <p id="wErr" style="color:var(--red);min-height:20px;font-size:13px"></p>
       <div class="actions" style="justify-content:space-between">
         ${w ? `<button class="btn ${!w.active ? '' : 'red'}" id="wToggle">${!w.active ? 'Switch back on' : 'Switch off'}</button>` : '<span></span>'}
         <span style="display:flex;gap:8px"><button class="btn line" data-x>Cancel</button><button class="btn" id="wSave">Save</button></span>
       </div>`);
     s.querySelector('#wSave').onclick = async () => {
-      const name = s.querySelector('#wName').value.trim(), stage = s.querySelector('#wStage').value, pin = s.querySelector('#wPin').value.trim();
+      const name = s.querySelector('#wName').value.trim(), stage = s.querySelector('#wStage').value;
       if (!name) return s.querySelector('#wErr').textContent = 'Add a name.';
-      if ((!w || pin) && !/^\d{4}$/.test(pin)) return s.querySelector('#wErr').textContent = 'The PIN must be exactly 4 numbers.';
       const btn = s.querySelector('#wSave'); btn.disabled = true;
-      const { error } = await db.rpc('ws_save_worker', { p: { id: w ? w.id : null, name, stage: w && w.task ? w.stage : stage, pin } });
+      const { error } = await db.rpc('ws_save_worker', { p: { id: w ? w.id : null, name, stage: w && w.task ? w.stage : stage } });
       if (error){ btn.disabled = false; s.querySelector('#wErr').textContent = errMsg(error); return; }
       closeModal(); toast('Saved'); await load();
     };
@@ -310,10 +699,72 @@
 
   /* =====================================================================
      ALARM: when a worker says their work has STOPPED
-     Siren + vibration until the owner taps "I'm on it".
-     SMS and phone call need an SMS service (e.g. Africa's Talking): not connected yet.
+     Siren + vibration + the voice reading it out, until the owner taps "I'm on it".
+     After 10 minutes with no answer it escalates: faster, and the voice says it's urgent.
+     No outside services (no SMS, no WhatsApp).
      ===================================================================== */
-  let muted = false, beepT = null, actx = null, tick = null;
+  const ESCALATE_AFTER_MIN = 10;
+  let muted = false, beepT = null, actx = null, tick = null, beepMode = 0;
+
+  /* ---------- VOICE: the phone reads alerts out loud (built into the phone, free) ---------- */
+  const VOICE = { lang: 'en', small: true, name: { en: null, sw: null } };
+  try { const sv = JSON.parse(localStorage.getItem('kt-voice') || 'null'); if (sv) Object.assign(VOICE, sv); } catch(e){}
+  const saveVoice = () => { try { localStorage.setItem('kt-voice', JSON.stringify(VOICE)); } catch(e){} };
+  const SW_REASON = { 'Material missing':'Vifaa vimeisha', 'Machine problem':'Mashine ina shida', 'Need instructions':'Anahitaji maelekezo', 'Something else':'Kuna shida nyingine' };
+  const SW_STAGE = { metal:'kazi ya chuma', foam:'foam na ushonaji', finish:'umaliziaji', load:'upakiaji' };
+  const sayRef = ref => ref.replace('KT-', 'K T ').split('').join(' ').replace(/\s+/g, ' ');
+  function voicesFor(lang){
+    const vs = window.speechSynthesis ? speechSynthesis.getVoices() : [];
+    const want = lang === 'sw' ? ['sw-ke','sw-tz','sw'] : ['en-ke','en-gb','en-us','en'];
+    const score = v => { const n = v.name.toLowerCase(); const l = (v.lang || '').replace('_','-').toLowerCase();
+      const li = want.findIndex(w => l.startsWith(w)); if (li < 0) return -1;
+      return (n.includes('natural') ? 300 : n.includes('online') ? 200 : n.includes('google') ? 150 : 0) + (10 - li) * 10; };
+    return vs.filter(v => score(v) >= 0).sort((x, y) => score(y) - score(x));
+  }
+  const pickVoice = lang => { const l = voicesFor(lang); return l.find(v => v.name === VOICE.name[lang]) || l[0] || null; };
+  function say(text, opts){
+    if (VOICE.lang === 'off' || !window.speechSynthesis) return;
+    const u = new SpeechSynthesisUtterance(text);
+    const v = pickVoice(VOICE.lang); if (v){ u.voice = v; u.lang = v.lang; } else u.lang = VOICE.lang === 'sw' ? 'sw-KE' : 'en-GB';
+    u.rate = .92; u.pitch = 1; u.volume = 1;
+    if (opts && opts.interrupt) speechSynthesis.cancel();
+    speechSynthesis.speak(u);
+  }
+  const hush = () => { if (window.speechSynthesis) speechSynthesis.cancel(); if (navigator.vibrate) navigator.vibrate(0); };
+  const sw = () => VOICE.lang === 'sw';
+  const MSG = {
+    stopped: (w, t, o, mins) => mins >= ESCALATE_AFTER_MIN
+      ? (sw() ? `Dharura. ${w} amesubiri dakika ${mins}. ${SW_REASON[t.problem.reason] || t.problem.reason}. Oda ${sayRef(o.ref)}.`
+              : `Urgent. ${w} has been waiting ${mins} minutes. ${t.problem.reason}. Order ${sayRef(o.ref)}.`)
+      : (sw() ? `Tahadhari. ${w} amesimama kazi. ${SW_REASON[t.problem.reason] || t.problem.reason}. Oda ${sayRef(o.ref)}.`
+              : `Alert. ${w} has stopped work. ${t.problem.reason}. Order ${sayRef(o.ref)}, ${stageName(t.stage)}.`),
+    problem: (w, t) => sw() ? `${w} ana shida. ${SW_REASON[t.problem.reason] || t.problem.reason}. Bado anaendelea na kazi.` : `${w} reported a problem. ${t.problem.reason}. They are still working.`,
+    finished: (w, o, next) => sw() ? `${w} amemaliza ${o.item}. ${next ? 'Imeenda ' + SW_STAGE[next] + '.' : 'Iko tayari kupelekwa.'}`
+                                   : `${w} finished the ${o.item.toLowerCase()}. ${next ? 'It has gone to ' + stageName(next) + '.' : 'It is ready for delivery.'}`,
+    web: (w) => sw() ? `Oda mpya kutoka kwa website. ${w.customer_name}.` : `New order from the website. ${w.customer_name}.`,
+    waiting: w => sw() ? `${w} anasubiri kazi.` : `${w} is waiting for work.`,
+    test: () => sw() ? 'Habari. Hii ni sauti ya Kartech.' : 'Hello. This is the Kartech voice.'
+  };
+  if (window.speechSynthesis) speechSynthesis.onvoiceschanged = () => { if (tab === 'today' && !document.querySelector('.scrim') && loaded) render(); };
+
+  /* Small updates: compare what changed since the last refresh and read it out once */
+  let prevTasks = null, prevWorkers = null, prevWeb = null, prevLogId = Infinity;
+  function announceChanges(){
+    if (!prevTasks){ prevTasks = new Map(S.tasks.map(t => [t.id, t])); prevWorkers = new Map(S.workers.map(w => [w.id, w])); prevWeb = new Set((S.web || []).map(w => w.id)); prevLogId = S.log.length ? S.log[0].id : 0; return; }
+    const lines = [];
+    (S.web || []).forEach(w => { if (!prevWeb.has(w.id)) lines.push(MSG.web(w)); });
+    prevWeb = new Set((S.web || []).map(w => w.id));
+    S.log.filter(l => l.id > prevLogId && l.kind === 'alert' && /^Low stock|MISSING|has been given|^Tool check: \d/.test(l.text)).slice(0, 2)
+      .forEach(l => lines.push(sw() ? (/^Low stock/.test(l.text) ? 'Tahadhari ya stoo. ' : 'Tahadhari ya vifaa. ') + l.text : l.text.replace(/KT-(\d+)/g, (m, d) => sayRef('KT-' + d)).replace(/ × /g, ' ')));
+    prevLogId = S.log.length ? S.log[0].id : prevLogId;
+    S.tasks.forEach(t => { const p = prevTasks.get(t.id); const o = O(t.order); if (!p || !o) return;
+      if (p.status !== 'done' && t.status === 'done'){ const w = W(t.worker); lines.push(MSG.finished(w ? w.name : 'A worker', o, o.stages[t.step])); }
+      if (t.problem && !t.problem.stopped && !(p.problem)){ const w = W(t.worker); lines.push(MSG.problem(w ? w.name : 'A worker', t)); } });
+    S.workers.forEach(w => { const p = prevWorkers.get(w.id); if (p && w.active && p.task && !w.task) lines.push(MSG.waiting(w.name)); });
+    prevTasks = new Map(S.tasks.map(t => [t.id, t])); prevWorkers = new Map(S.workers.map(w => [w.id, w]));
+    if (VOICE.small && !stoppedOpen().length) lines.slice(0, 3).forEach(l => say(l));
+  }
+
   const stoppedOpen = () => S.tasks.filter(t => t.problem && t.problem.stopped && !t.problem.ack);
   const mmss = n => Math.floor(n / 60) + ':' + String(n % 60).padStart(2, '0');
   function beep(){
@@ -331,35 +782,51 @@
   }
   function alarmRender(){
     const list = stoppedOpen(); const el = $('#alarm');
-    if (!list.length){ el.classList.add('hidden'); clearInterval(beepT); beepT = null; clearInterval(tick); tick = null; return; }
+    if (!list.length){ el.classList.add('hidden'); if (beepT) hush(); clearInterval(beepT); beepT = null; clearInterval(tick); tick = null; return; }
     const t = list[0], w = W(t.worker), o = O(t.order); if (!o) return;
     const n = Math.max(0, Math.floor((Date.now() - t.problem.at) / 1000));
-    el.innerHTML = `<button class="mute" id="muteBtn">${muted ? '🔇 Siren off' : '🔊 Siren + vibrate on'}</button><div class="box">
+    el.innerHTML = `<button class="mute" id="muteBtn">${muted ? '🔇 Sound off' : '🔊 Sound on'}</button><div class="box">
       <p class="tag">⚠ WORK HAS STOPPED</p>
       <h1>${esc(t.problem.reason)}</h1>
       <p class="who"><b>${esc(w ? w.name : 'A worker')}</b> · ${stageName(t.stage)} · ${o.ref}</p>
       <p class="timer">${o.qty} × ${esc(o.item)} · waiting ${mmss(n)}</p>
       <div class="ladder">
         <div><span class="ok">✓ Siren + vibration</span><span class="ok">now</span></div>
-        <div class="not-yet"><span>○ SMS to your phone</span><span>not connected yet</span></div>
-        <div class="not-yet"><span>○ Phone call to you</span><span>not connected yet</span></div>
+        <div class="${VOICE.lang === 'off' ? 'not-yet' : ''}"><span class="${VOICE.lang === 'off' ? '' : 'ok'}">${VOICE.lang === 'off' ? '○' : '✓'} Voice reads it out</span><span>${VOICE.lang === 'off' ? 'off' : sw() ? 'Kiswahili' : 'English'}</span></div>
+        <div class="${n >= ESCALATE_AFTER_MIN * 60 ? '' : 'not-yet'}"><span class="${n >= ESCALATE_AFTER_MIN * 60 ? 'ok' : ''}">${n >= ESCALATE_AFTER_MIN * 60 ? '✓' : '○'} Louder, faster, "urgent"</span><span>${n >= ESCALATE_AFTER_MIN * 60 ? 'now' : 'in ' + mmss(Math.max(0, ESCALATE_AFTER_MIN * 60 - n))}</span></div>
       </div>
       <button class="giant ack" data-ack="${t.id}">I'M ON IT</button>
       <p class="more">Tapping this stops the alarm and tells ${esc(w ? w.name : 'them')} you've seen it.${list.length > 1 ? ` <b>${list.length - 1} more waiting.</b>` : ''}</p>
     </div>`;
     el.classList.remove('hidden');
     if (!tick) tick = setInterval(alarmRender, 1000);
-    if (!beepT && !muted){ beep(); beepT = setInterval(() => { if (!muted) beep(); }, 1300); }
+    const mode = n >= ESCALATE_AFTER_MIN * 60 ? 2 : 1;          // 2 = escalated: repeats twice as often
+    if (beepT && mode !== beepMode){ clearInterval(beepT); beepT = null; }
+    if (!beepT && !muted){
+      beepMode = mode;
+      const cycle = () => { const x = stoppedOpen()[0]; if (muted || !x) return; beep();
+        setTimeout(() => { const y = stoppedOpen()[0]; if (!y || muted) return; const wy = W(y.worker), oy = O(y.order); if (!oy) return;
+          say(MSG.stopped(wy ? wy.name : 'A worker', y, oy, Math.floor((Date.now() - y.problem.at) / 60000)), { interrupt:true }); }, 1400); };
+      cycle(); beepT = setInterval(cycle, mode === 2 ? 4000 : 8000);
+    }
   }
   document.addEventListener('click', async e => {
-    if (e.target.closest('#muteBtn')){ muted = !muted; if (muted){ clearInterval(beepT); beepT = null; if (navigator.vibrate) navigator.vibrate(0); } alarmRender(); return; }
+    const vl = e.target.closest('[data-vlang]'); if (vl){ VOICE.lang = vl.dataset.vlang; saveVoice(); if ($('#setModal')) settingsModal(); render(); say(MSG.test(), { interrupt:true }); return; }
+    if (e.target.closest('#setBtn')) return settingsModal();
+    if (e.target.closest('#moreNews')){ showAll = true; render(); return; }
+    if (e.target.closest('#outBtn2')){ await db.auth.signOut(); location.reload(); return; }
+    if (e.target.closest('[data-neworder]')) return newOrderModal();
+    if (e.target.closest('#vTest')){ say(MSG.test(), { interrupt:true }); return; }
+    if (e.target.id === 'vSmall'){ VOICE.small = e.target.checked; saveVoice(); return; }
+    if (e.target.closest('#muteBtn')){ muted = !muted; if (muted){ clearInterval(beepT); beepT = null; hush(); } alarmRender(); return; }
     const a = e.target.closest('[data-ack]'); if (!a) return;
     a.disabled = true; a.textContent = 'Telling them…';
-    if (navigator.vibrate) navigator.vibrate(0);
+    hush();
     const t = T(a.dataset.ack); if (t) t.problem.ack = true;   // stop the siren straight away
     alarmRender();
     await act('ws_ack', { p_task: a.dataset.ack }, "They've been told you're on it");
   });
+  document.addEventListener('change', e => { if (e.target.id === 'vName'){ VOICE.name[VOICE.lang] = e.target.value; saveVoice(); say(MSG.test(), { interrupt:true }); } });
   // Phones block sound until the first tap. Any tap on the page unlocks it.
   document.addEventListener('pointerdown', () => { try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === 'suspended') actx.resume(); } catch(e){} }, { once:true });
 

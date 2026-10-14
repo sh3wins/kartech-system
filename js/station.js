@@ -1,12 +1,12 @@
 /* =====================================================================
    KARTECH WORKSHOP — shared workshop computer
    1. Signed in once with the workshop account (stays signed in).
-   2. A worker taps their name, enters their PIN, and sees only their own job.
+   2. A worker taps their name and sees only their own job (no PIN).
    3. Signs the worker out after a minute with no taps.
    ===================================================================== */
 (function(){
   const v = $('#stView');
-  let workers = [], pinFor = null, pin = '', token = null, me = null, job = null;
+  let tools = null, workers = [], pinFor = null, pin = '', token = null, me = null, job = null, mats = [];
   let probOpen = false, probReason = null, idleT = null, idleLeft = 0, pollT = null, sending = false;
 
   if (!db){ v.innerHTML = '<h1>Not set up yet</h1><p class="lead">Add the Supabase keys in js/config.js.</p>'; return; }
@@ -34,45 +34,191 @@
   async function loadNames(){
     const { data, error } = await db.rpc('ws_station_workers');
     if (error){ v.innerHTML = `<h1>Can't reach the system</h1><p class="lead">${esc(errMsg(error))}</p><button class="giant done" id="retry">Try again</button>`; return; }
-    workers = data; render();
+    workers = data; await loadTools(); render();
+  }
+
+  /* ---------- clock ---------- */
+  function tickClock(){ const d = new Date();
+    $('#clk').innerHTML = d.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' }).replace(':', '<i>:</i>');
+    $('#clkDate').textContent = d.toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short', year:'numeric' }); }
+  tickClock(); setInterval(tickClock, 10000);
+  let lastScreen = '';
+
+  /* ---------- FOREMAN page (behind the foreman code) ---------- */
+  async function loadTools(){
+    const { data, error } = await db.rpc('ws_tool_list');
+    tools = error ? null : data;
+  }
+  const nbNow = () => new Date(new Date().toLocaleString('en-US', { timeZone:'Africa/Nairobi' }));
+  const checkTime = () => { const [h, m] = (KT_CONFIG.toolCheckAt || '18:30').split(':').map(Number); const n = nbNow(); return n.getHours() * 60 + n.getMinutes() >= h * 60 + m; };
+  const checkNeeded = () => tools && tools.has_tools && !tools.done_today && checkTime();
+  setInterval(async () => { if (!me && !fm){ const before = JSON.stringify(tools); await loadTools(); if (JSON.stringify(tools) !== before) render(); } }, 60000);
+  let fm = null;      // { view:'pin'|'home'|'worker'|'check', pin, entry, data, wid, pick, qty, then, miss:Set }
+  let fmT = null;
+  function fmIdle(){ clearTimeout(fmT); fmT = setTimeout(() => { if (fm){ fm = null; render(); } }, 120000); }
+  function fmClose(){ fm = null; clearTimeout(fmT); loadTools().then(render); }
+  async function fmLoad(){
+    const { data, error } = await db.rpc('ws_foreman_open', { p_pin: fm.pin });
+    if (error){ toast(errMsg(error)); return false; }
+    if (data && data.error){ return data.error; }
+    fm.data = data; return true;
+  }
+  const fmTime = t => new Date(t).toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' });
+  const fmW = id => fm.data.workers.find(w => w.id === id);
+  function renderForeman(){
+    const head = (title, sub, back) => `<div class="st-head anim"><div><h1>${title}</h1>${sub ? `<p class="lead">${sub}</p>` : ''}</div>
+      <div class="st-out"><button class="btn line" id="${back ? 'fmBack' : 'fmExit'}">${back ? '← Back' : 'Close'}</button><p class="idle">Locks by itself after 2 minutes</p></div></div>`;
+    if (fm.view === 'pin'){
+      v.innerHTML = `<div class="fm-pin anim"><h1>Foreman</h1><p class="lead">Enter the foreman code</p>
+        <div class="pindots">${[0,1,2,3].map(i => `<i class="${i < fm.entry.length ? 'on' : ''}"></i>`).join('')}</div>
+        <div class="pad">${[1,2,3,4,5,6,7,8,9].map(n => `<button data-fk="${n}">${n}</button>`).join('')}<button data-fk="x" class="sm">Cancel</button><button data-fk="0">0</button><button data-fk="del" class="sm">⌫</button></div>
+        <p class="err" id="fmErr">${fm.err || ''}</p></div>`;
+      return;
+    }
+    const d = fm.data;
+    if (fm.view === 'home'){
+      const out = d.tools.filter(t => t.with);
+      v.innerHTML = head('Foreman', 'Tap a worker to tick the tools and materials they take.') + `
+        <button class="tc-banner anim ${checkNeeded() ? 'due' : ''}" id="fmCheck" style="--i:1"><span>🔧</span><span><b>${d.done_today ? 'Tool check done for today ✓' : 'Evening tool check'}</b><small>${out.length ? out.length + ' tool' + (out.length > 1 ? 's' : '') + ' out right now' : 'All tools are in'}</small></span></button>
+        ${STAGES.map((s, gi) => { const ws = d.workers.filter(w => w.stage === s.id); return ws.length ? `<div class="st-group anim" style="--i:${gi + 2}"><h4>${s.name}</h4><div class="names">${ws.map(w => { const n = d.tools.filter(t => t.with === w.id).length;
+          return `<button class="name fmname" data-fw="${w.id}"><span class="av">${esc(w.name.charAt(0))}</span><span>${esc(w.name)}<small>${n ? '🔧 ' + n + ' tool' + (n > 1 ? 's' : '') : ''}${w.job ? (n ? ' · ' : '') + esc(w.job.ref) : ''}</small></span></button>`; }).join('')}</div></div>` : ''; }).join('')}`;
+      return;
+    }
+    if (fm.view === 'worker'){
+      const w = fmW(fm.wid); if (!w){ fm.view = 'home'; return renderForeman(); }
+      const mats = d.materials.filter(m => !m.stages || !m.stages.length || m.stages.includes(w.stage));
+      const tl = d.tools.slice().sort((a, b) => (b.with === w.id) - (a.with === w.id) || (b.usual === w.id) - (a.usual === w.id) || a.name.localeCompare(b.name));
+      v.innerHTML = head(esc(w.name), `${stageName(w.stage)}${w.job ? ` · on <b>${esc(w.job.ref)}</b>, ${w.job.qty} × ${esc(w.job.item)}` : ' · no job right now'}`, true) + `
+        <div class="st-group anim" style="--i:1"><h4>Tools · tap when he takes it, tap again when it comes back</h4><div class="tc-grid">${tl.map(t => {
+          const mine = t.with === w.id, other = t.with && !mine;
+          return `<button class="tc ${mine ? 'out' : other ? 'other' : ''}" data-ft="${t.id}"><span class="tc-ic">${mine ? '↗' : other ? '•' : '✓'}</span><span><b>${esc(t.name)}</b><small>${mine ? 'With ' + esc(w.name) + ' since ' + fmTime(t.since) : other ? 'With ' + esc(t.with_name || 'someone') : 'In the store'}</small></span></button>`; }).join('') || '<p class="muted">No tools added yet. The owner adds them in the app.</p>'}</div></div>
+        <div class="st-group anim" style="--i:2"><h4>Materials for ${stageName(w.stage)} · tap what he takes</h4><div class="tc-grid">${mats.map(m => `<button class="tc mat" data-fmat="${m.id}"><span class="tc-ic">📦</span><span><b>${esc(m.name)}</b><small>${+(+m.in_store).toFixed(2)} ${esc(m.unit)} in store</small></span></button>`).join('') || '<p class="muted">No materials for this step yet.</p>'}</div></div>
+        ${w.today.length ? `<div class="sw-card today anim" style="--i:3"><p class="k">Taken today by ${esc(w.name)}</p>${w.today.map(x => `<p>${+(+x.qty).toFixed(2)} ${esc(x.unit)} <b>${esc(x.material)}</b></p>`).join('')}</div>` : ''}
+        ${fm.pick ? qtyPanel(w) : ''}`;
+      return;
+    }
+    if (fm.view === 'check'){
+      const groups = {};
+      d.tools.forEach(t => { const g = t.with ? 'With ' + (t.with_name || 'someone') : 'Should be on the rack'; (groups[g] = groups[g] || []).push(t); });
+      const n = fm.miss.size;
+      v.innerHTML = head('Tool check', 'Look at the rack. Everything is ticked as back. Tap only what is <b>missing</b>.', true) + `
+        ${Object.entries(groups).sort((a, b) => a[0].startsWith('Should') - b[0].startsWith('Should')).map(([g, ts], gi) => `<div class="st-group anim" style="--i:${gi + 1}"><h4>${esc(g)}</h4><div class="tc-grid">${ts.map(t => { const miss = fm.miss.has(t.id);
+          return `<button class="tc ${miss ? 'miss' : ''}" data-fc="${t.id}"><span class="tc-ic">${miss ? '✕' : '✓'}</span><span><b>${esc(t.name)}</b><small>${miss ? (t.missing ? 'Still missing' : 'Missing') : 'Back'}</small></span></button>`; }).join('')}</div></div>`).join('') || '<p class="muted">No tools added yet.</p>'}
+        <button class="giant ${n ? 'warnb' : 'go'}" id="fmCheckDone">${n ? `Done: ${n} missing` : '✓ All tools are back'}</button>`;
+    }
+  }
+  function qtyPanel(w){
+    const m = fm.data.materials.find(x => x.id === fm.pick); if (!m) return '';
+    return `<div class="fm-qty"><div class="sw-card">
+      <p class="k">${esc(w.name)} takes</p><h2>${esc(m.name)}</h2>
+      <div class="qty-show"><b>${fm.qty || '0'}</b> ${esc(m.unit)}</div>
+      <div class="quick">${[1, 2, 5, 10].map(n => `<button data-fq="${n}">${n}</button>`).join('')}</div>
+      <div class="pad">${[1,2,3,4,5,6,7,8,9].map(n => `<button data-fn="${n}">${n}</button>`).join('')}<button data-fn=".">.</button><button data-fn="0">0</button><button data-fn="del" class="sm">⌫</button></div>
+      <div class="qty-acts"><button class="btn line" id="fqCancel">Cancel</button><button class="btn line" id="fqBack">Brought back</button><button class="btn" id="fqGive">Give ${fm.qty || ''} ${esc(m.unit)}</button></div>
+    </div></div>`;
+  }
+  async function fmClick(b){
+    fmIdle();
+    if (b.id === 'fmExit') return fmClose();
+    if (b.id === 'fmBack'){ fm.view = 'home'; fm.pick = null; await fmLoad(); return renderForeman(); }
+    if (b.dataset.fk){
+      const k = b.dataset.fk;
+      if (k === 'x') return fmClose();
+      if (k === 'del'){ fm.entry = fm.entry.slice(0, -1); return renderForeman(); }
+      if (fm.entry.length < 4) fm.entry += k;
+      fm.err = ''; renderForeman();
+      if (fm.entry.length === 4){
+        fm.pin = fm.entry; fm.entry = '';
+        const r = await fmLoad();
+        if (r !== true){ fm.pin = null; fm.err = r === 'wrong' ? 'Wrong code. Try again.' : r === 'locked' ? 'Too many wrong codes. Wait 5 minutes.' : r === 'nocode' ? 'The owner has not set a foreman code yet (Workers page in the app).' : ''; return renderForeman(); }
+        fm.view = fm.then || 'home';
+        if (fm.view === 'check') fm.miss = new Set(fm.data.tools.filter(t => t.missing).map(t => t.id));
+        return renderForeman();
+      }
+      return;
+    }
+    if (b.id === 'fmCheck'){ await fmLoad(); fm.view = 'check'; fm.miss = new Set(fm.data.tools.filter(t => t.missing).map(t => t.id)); return renderForeman(); }
+    if (b.dataset.fw){ fm.wid = b.dataset.fw; fm.view = 'worker'; fm.pick = null; return renderForeman(); }
+    if (b.dataset.ft){
+      b.disabled = true;
+      const { data, error } = await db.rpc('ws_foreman_tool', { p_pin: fm.pin, p_tool: b.dataset.ft, p_worker: fm.wid });
+      if (error){ toast(errMsg(error)); b.disabled = false; return; }
+      const t = fm.data.tools.find(x => x.id === b.dataset.ft);
+      toast(data === 'back' ? `${t ? t.name : 'Tool'} returned ✓` : `${t ? t.name : 'Tool'} → ${fmW(fm.wid).name}`);
+      await fmLoad(); return renderForeman();
+    }
+    if (b.dataset.fmat){ fm.pick = b.dataset.fmat; fm.qty = ''; return renderForeman(); }
+    if (b.dataset.fq){ fm.qty = b.dataset.fq; return renderForeman(); }
+    if (b.dataset.fn){ const k = b.dataset.fn;
+      if (k === 'del') fm.qty = (fm.qty || '').slice(0, -1);
+      else if (!(k === '.' && (fm.qty || '').includes('.')) && (fm.qty || '').length < 6) fm.qty = (fm.qty || '') + k;
+      return renderForeman(); }
+    if (b.id === 'fqCancel'){ fm.pick = null; return renderForeman(); }
+    if (b.id === 'fqGive' || b.id === 'fqBack'){
+      const q = parseFloat(fm.qty); if (!q || q <= 0){ toast('Tap how much first'); return; }
+      b.disabled = true;
+      const { error } = await db.rpc(b.id === 'fqGive' ? 'ws_foreman_give' : 'ws_foreman_return', { p_pin: fm.pin, p_material: fm.pick, p_worker: fm.wid, p_qty: q });
+      if (error){ toast(errMsg(error)); b.disabled = false; return; }
+      const m = fm.data.materials.find(x => x.id === fm.pick);
+      toast(`${b.id === 'fqGive' ? 'Given' : 'Returned'}: ${q} ${m.unit} ${m.name}`);
+      fm.pick = null; await fmLoad(); return renderForeman();
+    }
+    if (b.dataset.fc){ fm.miss.has(b.dataset.fc) ? fm.miss.delete(b.dataset.fc) : fm.miss.add(b.dataset.fc); return renderForeman(); }
+    if (b.id === 'fmCheckDone'){
+      b.disabled = true;
+      const { data, error } = await db.rpc('ws_tool_check', { p_pin: fm.pin, p_list: [...fm.miss] });
+      if (error){ b.disabled = false; toast(errMsg(error)); return; }
+      fmClose();
+      cheer(data ? `Saved. ${data} missing. The owner has been told.` : 'All tools are back. Thank you!');
+    }
   }
 
   /* ---------- screens ---------- */
   function render(){
-    if (!me && !pinFor){
-      v.innerHTML = `<h1>Who's working?</h1><p class="lead">Tap your name.</p>
-        ${workers.length ? STAGES.map(s => { const ws = workers.filter(w => w.stage === s.id); return ws.length ? `<div class="st-group"><h4>${s.name.toUpperCase()}</h4><div class="names">${ws.map(w => `<button class="name" data-who="${w.id}">${esc(w.name)}</button>`).join('')}</div></div>` : ''; }).join('')
-          : '<div class="nowork"><p class="big">No workers yet</p><p style="color:#B9B8B2;font-size:17px">The owner adds workers on the Workers page.</p></div>'}`;
-      return;
-    }
-    if (pinFor && !me){
-      const w = workers.find(x => x.id === pinFor);
-      v.innerHTML = `<div class="pinbox"><h1>Hi ${esc(w ? w.name : '')}</h1><p class="lead">Enter your PIN</p>
-        <div class="pindots">${[0,1,2,3].map(i => `<i class="${i < pin.length ? 'on' : ''}"></i>`).join('')}</div>
-        <div class="pad">${[1,2,3,4,5,6,7,8,9].map(n => `<button data-k="${n}">${n}</button>`).join('')}<button data-k="back" style="font-size:18px">Back</button><button data-k="0">0</button><button data-k="del" style="font-size:18px">⌫</button></div>
-        <p class="err" id="pinErr"></p></div>`;
+    if (!me && fm){ lastScreen = 'fm'; v.classList.remove('enter'); return renderForeman(); }
+    const screen = !me ? 'names' : (job && job.task ? 'job:' + job.task.id + ':' + job.task.status : 'free');
+    const fresh = screen !== lastScreen; lastScreen = screen;
+    v.classList.toggle('enter', fresh);
+    if (!me){
+      const due = checkNeeded();
+      v.innerHTML = `<div class="fm-row anim">${due ? `<button class="tc-banner due" id="tcOpen"><span>🔧</span><span><b>It's ${KT_CONFIG.toolCheckAt || '18:30'}. Foreman: time for the tool check</b><small>Tap here before everyone goes home</small></span></button>` : ''}
+        <button class="fm-btn" id="fmOpen"><span>🔑</span><b>Foreman</b></button></div>
+        <h1 class="anim">Who's working?</h1><p class="lead anim" style="--i:1">Tap your name to see your job.</p>
+        ${workers.length ? STAGES.map((s, gi) => { const ws = workers.filter(w => w.stage === s.id); return ws.length ? `<div class="st-group anim" style="--i:${gi + 2}"><h4>${s.name}</h4><div class="names">${ws.map(w => `<button class="name" data-who="${w.id}"><span class="av">${esc(w.name.charAt(0))}</span>${esc(w.name)}</button>`).join('')}</div></div>` : ''; }).join('')
+          : '<div class="sw-card nowork anim" style="--i:2"><p class="big">No workers yet</p><p>The owner adds workers in the Kartech app.</p></div>'}`;
       return;
     }
     const t = job && job.task, o = job && job.order;
-    let body;
+    const head = `<div class="st-head anim"><div><h1>Hello, ${esc(job ? job.worker.name : '')}</h1><p class="lead">${job ? stageName(job.worker.stage) : ''}</p></div>
+      <div class="st-out"><button class="btn line" id="stOut">Sign out</button><p class="idle" id="idleTxt"></p></div></div>`;
     if (!t){
-      body = `<div class="nowork"><p class="big">No job right now</p><p style="color:#B9B8B2;font-size:17px">The owner can see you're free. Your next job will show here as soon as it's ready.</p></div>`;
-    } else {
-      body = `<div class="task">
-        <p class="k">${stageName(t.stage).toUpperCase()} · ${esc(o.ref)}</p>
-        <p class="big">${o.qty} × ${esc(o.item)}</p>
-        ${o.notes ? `<div class="note" style="font-size:19px">📝 ${esc(o.notes)}</div>` : ''}
-        <div class="meta" style="margin-top:12px"><span><span class="pill p-${o.urgency}">${URG_NAME[o.urgency]}</span></span><span>Due <b>${fmtDay(new Date(o.deadline + 'T17:00'))}</b></span><span>Then goes to: <b>${job.after ? stageName(job.after) : 'Delivery'}</b></span></div>
-        ${t.problem_reason ? `<div class="note" style="border-color:var(--red);color:var(--red)">⚠ You reported: <b>${esc(t.problem_reason)}</b>${t.problem_stopped ? ' · work stopped' : ''}.<br>${t.problem_ack ? '<b style="color:var(--green)">✓ The owner has seen this and is on it.</b>' : t.problem_stopped ? "The owner's alarm is ringing. Please wait here." : 'The owner has been told.'}</div>` : ''}
-      </div>
-      ${t.status === 'assigned' ? `<button class="giant go" id="stStart">START THIS JOB</button>` : `<button class="giant done" id="stDone">✓ I'VE FINISHED</button>`}
-      ${probReason ? `<p style="margin-top:18px;font-size:20px;font-weight:600">${esc(probReason)}: has your work stopped?</p><div class="stop2"><button class="yes" data-stop="1">YES, I CAN'T CONTINUE</button><button class="no" data-stop="0">No, I can keep going for now</button></div>`
-        : probOpen ? `<div class="probs">${['Material missing','Machine problem','Need instructions','Something else'].map(r => `<button data-prob="${r}">${r}</button>`).join('')}</div>`
-        : t.problem_reason ? '' : `<button class="giant prob" id="stProb">Report a problem</button>`}`;
+      v.innerHTML = head + `<div class="sw-card nowork anim" style="--i:1"><div class="dots"><i></i><i></i><i></i></div><p class="big">No job right now</p><p>The owner can see you're free. Your next job will show here as soon as it's ready.</p></div>`;
+      return;
     }
-    v.innerHTML = `<div class="st-head"><div><h1>${esc(job ? job.worker.name : '')}</h1><p class="lead" style="margin:0">${job ? stageName(job.worker.stage) : ''}</p></div><div style="text-align:right"><button class="btn line" id="stOut" style="color:var(--paper);border-color:#555">Sign out</button><p class="idle" id="idleTxt"></p></div></div>
-      ${body}
-      ${t && job.next ? `<p class="upnext">Up next in ${stageName(job.worker.stage)}: <b>${esc(job.next.ref)} · ${job.next.qty} × ${esc(job.next.item)}</b></p>` : ''}`;
+    const working = t.status === 'working';
+    const card = `<div class="sw-card cur anim" style="--i:1">
+        <p class="k">Your current task</p>
+        <p class="ref">${esc(o.ref)}</p>
+        <p class="big">${o.qty} × ${esc(o.item)}</p>
+        <p class="step">${stageName(t.stage)}${working ? ' · <span class="on">in progress</span>' : ''}</p>
+        <div class="tags"><span class="tag u-${o.urgency}">${o.urgency === 'normal' ? 'Normal' : '● ' + URG_NAME[o.urgency] + ' priority'}</span><span class="tag due">◷ Due ${fmtDay(new Date(o.deadline + 'T17:00'))}</span><span class="tag">Then: ${job.after ? stageName(job.after) : 'Delivery'}</span></div>
+        ${o.notes ? `<div class="note">📝 ${esc(o.notes)}</div>` : ''}
+        ${mats.length ? `<div class="note mats-given"><b>📦 Materials given to you for this job</b><br>${mats.map(m => `${+(+m.qty).toFixed(2)} ${esc(m.unit)} ${esc(m.name)}`).join(' · ')}<br><small>Bring anything left over back to the store.</small></div>` : ''}
+        ${t.problem_reason ? `<div class="note warn">⚠ You reported: <b>${esc(t.problem_reason)}</b>${t.problem_stopped ? ' · work stopped' : ''}.<br>${t.problem_ack ? '<b class="okay">✓ The owner has seen this and is on it.</b>' : t.problem_stopped ? "The owner's alarm is ringing. Please wait here." : 'The owner has been told.'}</div>` : ''}
+        ${working ? `<button class="giant done" id="stDone">✓ I've finished</button>` : `<button class="giant go" id="stStart">▶ Start work</button>`}
+      </div>`;
+    const side = `<div class="sw-card nxt anim" style="--i:2"><p class="k">Next in line</p>
+        ${job.next ? `<p class="ref">${esc(job.next.ref)}</p><p class="mid">${job.next.qty} × ${esc(job.next.item)}</p><p class="muted">${stageName(job.worker.stage)}</p>` : '<p class="muted">Nothing waiting after this one.</p>'}</div>`;
+    const help = probReason ? `<div class="sw-card help anim"><p class="q">${esc(probReason)}: has your work stopped?</p><div class="stop2"><button class="yes" data-stop="1">Yes, I can't continue</button><button class="no" data-stop="0">No, I can keep going</button></div></div>`
+      : probOpen ? `<div class="sw-card help anim"><p class="q">What's the problem?</p><div class="probs">${['Material missing','Machine problem','Need instructions','Something else'].map(r => `<button data-prob="${r}">${r}</button>`).join('')}</div></div>`
+      : t.problem_reason ? '' : `<p class="needhelp anim" style="--i:3">Need help? <button id="stProb">Report a problem</button></p>`;
+    v.innerHTML = head + `<div class="sw-grid">${card}${side}</div>` + help;
+  }
+
+  function cheer(text){
+    const c = $('#cheer'); $('#cheerTxt').textContent = text;
+    c.classList.remove('hidden'); c.classList.remove('go'); void c.offsetWidth; c.classList.add('go');
+    setTimeout(() => c.classList.add('hidden'), 1700);
   }
 
   async function refreshJob(){
@@ -80,8 +226,9 @@
     const { data, error } = await db.rpc('ws_my_job', { p_token: token });
     if (error){ if (/Signed out/i.test(error.message)) return signOut(); $('#live').classList.add('off'); return; }
     $('#live').classList.remove('off');
-    const before = JSON.stringify(job); job = data;
-    if (JSON.stringify(job) !== before && !probOpen && !probReason) render();
+    const mr = data && data.task ? await db.rpc('ws_my_materials', { p_token: token }) : { data: [] };
+    const before = JSON.stringify([job, mats]); job = data; mats = mr.error ? [] : (mr.data || []);
+    if (JSON.stringify([job, mats]) !== before && !probOpen && !probReason) render();
   }
 
   /* ---------- idle sign-out ---------- */
@@ -94,7 +241,7 @@
     }, 1000);
   }
   async function signOut(){
-    const tk = token; me = null; token = null; job = null; pinFor = null; pin = ''; probOpen = false; probReason = null;
+    const tk = token; me = null; token = null; job = null; mats = []; pinFor = null; pin = ''; probOpen = false; probReason = null;
     clearInterval(idleT); clearInterval(pollT);
     if (tk) db.rpc('ws_logout', { p_token: tk });
     await loadNames();
@@ -113,28 +260,24 @@
     resetIdle();
     const b = e.target.closest('button'); if (!b) return;
     if (b.id === 'retry') return loadNames();
-    if (b.dataset.who){ pinFor = b.dataset.who; pin = ''; render(); return; }
-    if (b.dataset.k){
-      const k = b.dataset.k;
-      if (k === 'back'){ pinFor = null; pin = ''; render(); return; }
-      if (k === 'del'){ pin = pin.slice(0, -1); render(); return; }
-      if (pin.length < 4) pin += k;
-      render();
-      if (pin.length === 4){
-        const { data, error } = await db.rpc('ws_login', { p_worker: pinFor, p_pin: pin });
-        if (error){ pin = ''; render(); $('#pinErr').textContent = errMsg(error) + (/Wrong PIN/.test(error.message) ? '. Try again.' : ''); return; }
-        token = data; me = pinFor; pinFor = null; pin = '';
-        await refreshJob(); render(); resetIdle();
-        pollT = setInterval(refreshJob, 8000);
-      }
+    if (fm) return fmClick(b);
+    if (b.id === 'fmOpen' || b.id === 'tcOpen'){ fm = { view:'pin', entry:'', then: b.id === 'tcOpen' ? 'check' : 'home' }; fmIdle(); return render(); }
+    if (b.dataset.who){
+      b.disabled = true;
+      const { data, error } = await db.rpc('ws_tap_in', { p_worker: b.dataset.who });
+      if (error){ b.disabled = false; toast(errMsg(error)); return; }
+      token = data; me = b.dataset.who;
+      await refreshJob(); render(); resetIdle();
+      pollT = setInterval(refreshJob, 8000);
       return;
     }
     if (b.id === 'stOut') return signOut();
     if (b.id === 'stStart'){ b.disabled = true; if (await call('ws_start')) toast('Started. Good work!'); return; }
     if (b.id === 'stDone'){
-      if (b.dataset.sure !== '1'){ b.dataset.sure = '1'; b.textContent = 'TAP AGAIN TO CONFIRM'; b.style.background = 'var(--green)'; b.style.color = '#fff'; return; }
+      if (b.dataset.sure !== '1'){ b.dataset.sure = '1'; b.textContent = 'Tap again to confirm'; b.classList.add('sure'); return; }
       b.disabled = true; probOpen = false; probReason = null;
-      if (await call('ws_finish')) toast(job && job.task ? `Done! Your next job is ${job.order.ref}.` : 'Done! No job waiting. The owner can see you are free.');
+      const nm = job ? job.worker.name : '';
+      if (await call('ws_finish')){ cheer(`Well done, ${nm}!`); toast(job && job.task ? `Your next job is ${job.order.ref}.` : 'No job waiting. The owner can see you are free.'); }
       return;
     }
     if (b.id === 'stProb'){ probOpen = true; render(); return; }

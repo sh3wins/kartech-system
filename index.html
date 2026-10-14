@@ -5,30 +5,48 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Kartech Workshop</title>
 <meta name="robots" content="noindex, nofollow">
-<meta name="theme-color" content="#111210">
+<meta name="theme-color" content="#1F3A2A">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="mobile-web-app-capable" content="yes">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/app.css?v=1">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/app.css?v=5">
+<link rel="stylesheet" href="css/dash.css?v=4">
 </head>
-<body>
+<body class="dash">
 
-<header class="top">
-  <div class="brand">KARTECH<small>ENGINEERING · WORKSHOP</small></div>
+<!-- left menu (computer) / bottom menu (phone) -->
+<aside class="side hidden" id="side">
+  <div class="logo"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M6 4h8v13L26 4h10L22 19l15 17H26L14 22v14H6z" fill="currentColor"/></svg><span>KARTECH<small>ENGINEERING</small></span></div>
+  <nav class="tabs">
+    <button data-tab="today" class="on"><svg viewBox="0 0 24 24"><path d="M3 3h8v8H3zM13 3h8v5h-8zM13 10h8v11h-8zM3 13h8v8H3z"/></svg><span>Dashboard</span> <span class="badge" id="attnBadge"></span></button>
+    <button data-tab="orders"><svg viewBox="0 0 24 24"><path d="M5 3h14v18H5zM8 7h8M8 11h8M8 15h5"/></svg><span>Orders</span></button>
+    <button data-tab="workshop"><svg viewBox="0 0 24 24"><path d="M3 21V9l6 4V9l6 4V5h6v16z"/></svg><span>Workshop</span></button>
+    <button data-tab="stock"><svg viewBox="0 0 24 24"><path d="M3 8l9-5 9 5v10l-9 5-9-5zM3 8l9 5 9-5M12 13v10"/></svg><span>Stock</span></button>
+    <button data-tab="workers"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3-6 7-6s7 2 7 6M17 11a3 3 0 1 0 0-6M22 21c0-3-2-5-5-5"/></svg><span>Workers</span></button>
+  </nav>
+  <div class="side-foot">
+    <button class="side-set" id="sideSet"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg><span>Voice &amp; settings</span></button>
+    <div class="me"><span class="me-av">O</span><span><b>Owner</b><small id="who"></small></span></div>
+  </div>
+</aside>
+
+<!-- phone top bar -->
+<header class="mbar hidden" id="mbar">
+  <div class="logo"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M6 4h8v13L26 4h10L22 19l15 17H26L14 22v14H6z" fill="currentColor"/></svg><span>Kartech</span></div>
   <span class="live hidden" id="live"><i></i> Live</span>
-  <span class="who hidden" id="who"></span>
-  <button class="btn line hidden" id="outBtn">Sign out</button>
+  <button class="mset" id="mSet" aria-label="Voice and settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg></button>
 </header>
 
-<!-- sign in -->
+<!-- sign in (only once on each phone) -->
 <section class="login hidden" id="loginView">
   <form class="box" id="loginForm">
+    <div class="logo dark"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M6 4h8v13L26 4h10L22 19l15 17H26L14 22v14H6z" fill="currentColor"/></svg><span>KARTECH<small>ENGINEERING</small></span></div>
     <h1>Owner sign in</h1>
-    <p class="sub">Orders, jobs and workers for the Kartech workshop.</p>
+    <p class="sub">You only do this once. After this the app opens straight away.</p>
     <label class="field"><span>Email</span><input id="lEmail" type="email" autocomplete="username" required></label>
     <label class="field"><span>Password</span><input id="lPass" type="password" autocomplete="current-password" required></label>
     <p id="lErr" style="color:var(--red);min-height:20px;font-size:13px"></p>
@@ -40,24 +58,18 @@
 <section class="login hidden" id="setupView"><div class="box"><h1>Not set up yet</h1><p class="sub">Add the Supabase keys in js/config.js.</p></div></section>
 
 <main id="owner" class="owner hidden">
-  <nav class="tabs">
-    <button data-tab="today" class="on">Today <span class="badge" id="attnBadge"></span></button>
-    <button data-tab="orders">Orders</button>
-    <button data-tab="workshop">Workshop</button>
-    <button data-tab="workers">Workers</button>
-    <span class="spacer"></span>
-    <button class="btn newbtn" id="newOrderBtn">+ New order</button>
-  </nav>
   <section id="view"><p class="empty">Loading…</p></section>
 </main>
 <button class="fab hidden" id="fab" aria-label="New order">+</button>
+<button class="hidden" id="newOrderBtn"></button>
+<button class="hidden" id="outBtn"></button>
 
 <div class="toast" id="toast"></div>
 <div class="alarm hidden" id="alarm"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="js/config.js?v=1"></script>
-<script src="js/owner.js?v=1"></script>
+<script src="js/config.js?v=2"></script>
+<script src="js/owner.js?v=8"></script>
 <script>if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(()=>{});</script>
 </body>
 </html>
