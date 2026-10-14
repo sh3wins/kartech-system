@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kartech Workshop PC</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#111210">
+<link rel="icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/app.css?v=1">
+<style>body{background:var(--ink)}</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">KARTECH<small>ENGINEERING · WORKSHOP PC</small></div>
+  <span class="live hidden" id="live"><i></i> Live</span>
+</header>
+
+<main class="station">
+  <!-- one-time setup: sign this computer in with the workshop account -->
+  <section class="login hidden" id="setView">
+    <form class="box" id="setForm">
+      <h1>Set up this computer</h1>
+      <p class="sub">Sign in once with the <b>workshop</b> account. After that, workers just tap their name and enter their PIN.</p>
+      <label class="field"><span>Workshop account email</span><input id="sEmail" type="email" autocomplete="username" required></label>
+      <label class="field"><span>Password</span><input id="sPass" type="password" autocomplete="current-password" required></label>
+      <p id="sErr" style="color:#E58C80;min-height:20px;font-size:13px"></p>
+      <button class="btn" id="sBtn">Set up</button>
+    </form>
+  </section>
+  <div class="wrap" id="stView"></div>
+</main>
+
+<div class="toast" id="toast"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js?v=1"></script>
+<script src="js/station.js?v=1"></script>
+</body>
+</html>

@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kartech Workshop</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#111210">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#111210; --ink2:#1c1d1a; --paper:#F6F4EF; --card:#FFFFFF; --line:#E3E0D8;
+  --green:#3F5A3D; --green-dim:#2C4029; --green-soft:#E6ECE3;
+  --metal:#8B8D89; --muted:#6B6D68;
+  --red:#A3342A; --red-soft:#F6E3E0; --amber:#9A6A12; --amber-soft:#F5ECD9; --blue:#2F4A7A; --blue-soft:#E2E8F2;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--paper);color:var(--ink);font-family:'Inter',sans-serif;font-size:15px;line-height:1.45}
+button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
+input,select,textarea{font:inherit;color:inherit}
+h1,h2,h3,.brand,.big{font-family:'Archivo',sans-serif}
+.hidden{display:none!important}
+
+/* top bar */
+.top{position:sticky;top:0;z-index:30;background:var(--ink);color:var(--paper);display:flex;align-items:center;gap:16px;padding:12px 20px;padding-top:calc(12px + env(safe-area-inset-top,0px))}
+.brand{font-weight:800;letter-spacing:.02em;font-size:17px;line-height:1.05}
+.brand small{display:block;font-family:'Inter';font-weight:500;font-size:10.5px;letter-spacing:.18em;color:var(--metal)}
+.demo{background:#C9A24A;color:var(--ink);font-size:11px;font-weight:700;letter-spacing:.08em;padding:3px 8px;border-radius:3px}
+.switch{margin-left:auto;display:flex;background:var(--ink2);border:1px solid #333;border-radius:6px;padding:3px}
+.switch button{padding:7px 14px;border-radius:4px;font-size:13px;font-weight:600;color:#bbb}
+.switch button.on{background:var(--paper);color:var(--ink)}
+
+/* owner layout */
+.owner{max-width:1180px;margin:0 auto;padding:20px 20px 100px}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:20px}
+.tabs button{padding:12px 14px;font-weight:600;color:var(--muted);border-bottom:3px solid transparent;margin-bottom:-1px}
+.tabs button.on{color:var(--ink);border-color:var(--green)}
+.tabs .badge{display:inline-block;min-width:18px;padding:0 5px;border-radius:9px;background:var(--red);color:#fff;font-size:11px;text-align:center;margin-left:4px}
+.tabs .spacer{flex:1}
+.tabs .btn{color:#fff;border:0;margin:6px 0;padding:10px 16px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:10px 16px;border-radius:6px;font-weight:600;background:var(--green);color:#fff}
+.btn:hover{background:var(--green-dim)}
+.btn.line{background:transparent;border:1px solid var(--line);color:var(--ink)}
+.btn.line:hover{background:#fff}
+.btn.sm{padding:6px 10px;font-size:13px}
+.btn.red{background:var(--red)}
+
+h2{font-size:22px;margin-bottom:4px}
+.sub{color:var(--muted);margin-bottom:18px}
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:22px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px 16px;text-align:left}
+.stat b{display:block;font-family:'Archivo';font-size:30px;line-height:1.1}
+.stat span{color:var(--muted);font-size:13px}
+.stat.alert b{color:var(--red)}
+.stat.warn b{color:var(--amber)}
+.section-title{font-family:'Archivo';font-weight:700;font-size:15px;margin:22px 0 10px;letter-spacing:.01em}
+.list{background:var(--card);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.item{display:flex;align-items:center;gap:12px;padding:13px 16px;border-top:1px solid var(--line)}
+.item:first-child{border-top:0}
+.item .grow{flex:1;min-width:0}
+.item .t{font-weight:600}
+.item .s{color:var(--muted);font-size:13px}
+.dot{width:10px;height:10px;border-radius:50%;flex:none}
+.dot.red{background:var(--red)}.dot.amber{background:#C9A24A}.dot.green{background:var(--green)}.dot.grey{background:var(--metal)}
+.empty{padding:22px 16px;color:var(--muted);text-align:center}
+.pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;font-weight:600;white-space:nowrap}
+.p-urgent{background:var(--red-soft);color:var(--red)}
+.p-high{background:var(--amber-soft);color:var(--amber)}
+.p-normal{background:#EEEDE8;color:var(--muted)}
+.p-working{background:var(--green-soft);color:var(--green)}
+.p-waiting{background:var(--amber-soft);color:var(--amber)}
+.p-attention{background:var(--red-soft);color:var(--red)}
+.p-notstarted{background:var(--blue-soft);color:var(--blue)}
+.p-done{background:var(--green);color:#fff}
+.feed .item{padding:10px 16px}
+.feed .when{color:var(--muted);font-size:12px;white-space:nowrap}
+
+/* orders */
+.order{display:grid;grid-template-columns:1.4fr 2fr auto;gap:16px;align-items:center;padding:14px 16px;border-top:1px solid var(--line);cursor:pointer;width:100%;text-align:left}
+.order:first-child{border-top:0}
+.order:hover{background:#FBFAF7}
+.ref{font-family:'Archivo';font-weight:700}
+.pipe{display:flex;gap:4px}
+.seg{flex:1;min-width:0}
+.seg i{display:block;height:8px;border-radius:2px;background:#E9E7E1}
+.seg.done i{background:var(--green)}
+.seg.now i{background:repeating-linear-gradient(45deg,var(--green) 0 6px,#6F8A6C 6px 12px)}
+.seg.skip i{background:transparent;border:1px dashed var(--line)}
+.seg em{display:block;font-style:normal;font-size:11px;color:var(--muted);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.seg.now em{color:var(--green);font-weight:600}
+.due{text-align:right;font-size:13px}
+.due.late{color:var(--red);font-weight:600}
+
+/* workshop board */
+.board{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.col{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px;min-width:0}
+.col h3{font-size:15px;margin-bottom:2px}
+.col .s{color:var(--muted);font-size:12px;margin-bottom:10px}
+.wk{border:1px solid var(--line);border-radius:6px;padding:10px;margin-bottom:8px}
+.wk .n{font-weight:600;display:flex;justify-content:space-between;gap:6px;align-items:center}
+.wk .c{font-size:12.5px;color:var(--muted);margin-top:4px}
+.q-label{font-size:11px;letter-spacing:.12em;color:var(--muted);font-weight:600;margin:14px 0 6px}
+.q{display:flex;align-items:center;gap:6px;padding:8px;border:1px solid var(--line);border-radius:6px;margin-bottom:6px;background:#FCFBF8}
+.q .grow{flex:1;min-width:0;font-size:13px}
+.q .grow b{display:block;font-size:13px}
+.q .num{font-family:'Archivo';font-weight:700;color:var(--metal);width:16px;text-align:center}
+.mini{width:28px;height:28px;border-radius:5px;border:1px solid var(--line);background:#fff;font-size:14px;line-height:1}
+.mini:hover{background:var(--green-soft)}
+.mini:disabled{opacity:.3;cursor:default}
+
+/* modal */
+.scrim{position:fixed;inset:0;background:rgba(17,18,16,.55);z-index:50;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto}
+.modal{background:var(--paper);border-radius:10px;width:100%;max-width:520px;padding:22px}
+.modal h2{margin-bottom:14px}
+.field{display:block;margin-bottom:12px}
+.field span{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
+.field input,.field select,.field textarea{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:6px;background:#fff}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.seg-pick{display:flex;gap:6px}
+.seg-pick button{flex:1;padding:10px;border:1px solid var(--line);border-radius:6px;background:#fff;font-weight:600;font-size:13px}
+.seg-pick button.on{border-color:var(--ink);background:var(--ink);color:var(--paper)}
+.checks{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.checks label{display:flex;gap:8px;align-items:center;padding:9px 10px;border:1px solid var(--line);border-radius:6px;background:#fff;font-size:13.5px}
+.checks input{accent-color:var(--green);width:16px;height:16px}
+.actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+.steps{margin-top:6px}
+.step{display:flex;gap:12px;padding:10px 0;border-top:1px solid var(--line)}
+.step:first-child{border-top:0}
+
+/* toast */
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);opacity:0;background:var(--ink);color:var(--paper);padding:12px 18px;border-radius:8px;font-weight:500;z-index:80;transition:.25s;max-width:90vw;text-align:center}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* station */
+.station{min-height:calc(100vh - 60px);background:var(--ink);color:var(--paper);padding:28px 20px 40px}
+.station .wrap{max-width:980px;margin:0 auto}
+.station h1{font-size:34px;margin-bottom:4px}
+.station .lead{color:#B9B8B2;margin-bottom:22px;font-size:17px}
+.st-group{margin-bottom:18px}
+.st-group h4{font-size:12px;letter-spacing:.16em;color:var(--metal);margin-bottom:8px;font-weight:600}
+.names{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
+.name{background:var(--ink2);border:1px solid #34352f;border-radius:10px;padding:20px 16px;font-family:'Archivo';font-weight:700;font-size:21px;text-align:left}
+.name:hover{border-color:var(--green);background:#20231f}
+.pinbox{max-width:360px;margin:0 auto;text-align:center}
+.pindots{display:flex;gap:14px;justify-content:center;margin:22px 0}
+.pindots i{width:18px;height:18px;border-radius:50%;border:2px solid #777}
+.pindots i.on{background:var(--paper);border-color:var(--paper)}
+.pad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.pad button{background:var(--ink2);border:1px solid #34352f;border-radius:10px;padding:18px 0;font-family:'Archivo';font-size:26px;font-weight:700}
+.pad button:active{background:var(--green)}
+.err{color:#E58C80;min-height:22px;margin-top:10px}
+.task{background:var(--paper);color:var(--ink);border-radius:14px;padding:26px;margin:18px 0}
+.task .k{font-size:12px;letter-spacing:.16em;color:var(--muted);font-weight:600}
+.task .big{font-size:34px;font-weight:800;line-height:1.1;margin:6px 0 10px}
+.task .meta{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:17px;color:#333}
+.task .note{margin-top:14px;padding:12px;background:#fff;border-radius:8px;border:1px solid var(--line);font-size:16px}
+.giant{width:100%;padding:24px;border-radius:12px;font-family:'Archivo';font-size:26px;font-weight:800;letter-spacing:.02em;margin-top:12px}
+.giant.go{background:var(--green);color:#fff}
+.giant.done{background:var(--paper);color:var(--ink)}
+.giant.prob{background:transparent;border:2px solid #5a5b55;color:var(--paper);font-size:19px;padding:16px}
+.probs{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.probs button{background:var(--ink2);border:1px solid #44453f;border-radius:10px;padding:20px 12px;font-weight:600;font-size:17px}
+.st-head{display:flex;align-items:center;gap:12px;justify-content:space-between}
+.idle{color:var(--metal);font-size:13px}
+.nowork{text-align:center;padding:50px 20px;border:2px dashed #3a3b35;border-radius:14px;margin:20px 0}
+.nowork .big{font-size:28px;margin-bottom:8px}
+.upnext{margin-top:20px;color:#B9B8B2}
+.upnext b{color:var(--paper)}
+.hint{margin-top:26px;color:#77786f;font-size:13px;text-align:center}
+
+/* phone */
+@media (max-width:820px){
+  .cards{grid-template-columns:1fr 1fr}
+  .board{grid-template-columns:1fr}
+  .order{grid-template-columns:1fr;gap:8px}
+  .due{text-align:left}
+  .tabs{position:fixed;bottom:0;left:0;right:0;z-index:40;background:#fff;border-top:1px solid var(--line);border-bottom:0;margin:0;padding:0 6px env(safe-area-inset-bottom,0px);justify-content:space-around}
+  .tabs button{border-bottom:0;border-top:3px solid transparent;margin:0;padding:12px 8px;font-size:13px}
+  .tabs button.on{border-color:var(--green)}
+  .tabs .spacer,.tabs .newbtn{display:none}
+  .fab{display:flex!important}
+  .top{padding:10px 14px}
+  .switch button{padding:6px 10px;font-size:12px}
+  .owner{padding:16px 14px 110px}
+  .brand small{display:none}
+  .station h1{font-size:28px}
+  .task .big{font-size:28px}
+}
+/* alarm */
+.alarm{position:fixed;inset:0;z-index:90;background:rgba(120,20,14,.94);color:#fff;display:flex;align-items:center;justify-content:center;padding:20px;animation:flash 1.2s infinite}
+@keyframes flash{0%,100%{background:rgba(120,20,14,.94)}50%{background:rgba(163,52,42,.97)}}
+.alarm .box{max-width:560px;width:100%}
+.alarm .tag{font-size:13px;letter-spacing:.2em;font-weight:700;opacity:.85}
+.alarm h1{font-size:40px;line-height:1.05;margin:8px 0 6px}
+.alarm .who{font-size:20px;margin-bottom:4px}
+.alarm .timer{font-family:'Archivo';font-size:18px;opacity:.9;margin-bottom:18px}
+.ladder{background:rgba(0,0,0,.25);border-radius:10px;padding:12px 14px;margin-bottom:18px}
+.ladder div{display:flex;justify-content:space-between;gap:10px;padding:6px 0;font-size:15px}
+.ladder .ok{font-weight:700}
+.ladder .soon{opacity:.75}
+.alarm .giant{margin-top:0}
+.alarm .ack{background:#fff;color:var(--red)}
+.alarm .more{color:#fff;opacity:.85;margin-top:12px;font-size:14px;text-align:center}
+.alarm .mute{position:absolute;top:84px;right:16px;border:1px solid rgba(255,255,255,.5);border-radius:6px;padding:6px 10px;font-size:13px}
+.switch button.ring{position:relative}
+.switch button.ring::after{content:"";position:absolute;top:4px;right:4px;width:9px;height:9px;border-radius:50%;background:#E5483B;animation:flash2 1s infinite}
+@keyframes flash2{50%{opacity:.2}}
+.stop2{display:grid;grid-template-columns:1fr;gap:10px;margin-top:12px}
+.stop2 button{border-radius:12px;padding:22px;font-family:'Archivo';font-weight:800;font-size:22px}
+.stop2 .yes{background:#A3342A;color:#fff}
+.stop2 .no{background:var(--ink2);border:1px solid #44453f;color:var(--paper);font-size:18px}
+.p-stopped{background:var(--red);color:#fff}
+.fab{display:none;position:fixed;right:16px;bottom:78px;z-index:41;width:56px;height:56px;border-radius:50%;background:var(--green);color:#fff;font-size:28px;align-items:center;justify-content:center;box-shadow:0 6px 18px rgba(0,0,0,.25)}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">KARTECH<small>ENGINEERING · WORKSHOP</small></div>
+  <span class="demo" title="Sample workers and orders, not real data">DEMO</span>
+  <div class="switch" role="tablist">
+    <button id="swOwner" class="on">Owner</button>
+    <button id="swStation">Workshop PC</button>
+  </div>
+</header>
+
+<!-- ============ OWNER ============ -->
+<main id="owner" class="owner">
+  <nav class="tabs">
+    <button data-tab="today" class="on">Today <span class="badge" id="attnBadge"></span></button>
+    <button data-tab="orders">Orders</button>
+    <button data-tab="workshop">Workshop</button>
+    <button data-tab="workers">Workers</button>
+    <span class="spacer"></span>
+    <button class="btn newbtn" id="newOrderBtn">+ New order</button>
+  </nav>
+  <section id="view"></section>
+</main>
+<button class="fab" id="fab" aria-label="New order">+</button>
+
+<!-- ============ STATION ============ -->
+<main id="station" class="station hidden"><div class="wrap" id="stView"></div></main>
+
+<div class="toast" id="toast"></div>
+<div class="alarm hidden" id="alarm"></div>
+
+<script>
+/* =====================================================================
+   KARTECH WORKSHOP — clickable demo.
+   Everything lives in memory: refresh the page to reset.
+   The real version will save to the Kartech Supabase database.
+   ===================================================================== */
+const STAGES = [
+  { id:'metal',  name:'Metalwork',              short:'Metal' },
+  { id:'foam',   name:'Foaming & fabrication',  short:'Foam & fab' },
+  { id:'finish', name:'Finishing',              short:'Finishing' },
+  { id:'load',   name:'Loading',                short:'Loading' }
+];
+const URG = { urgent:0, high:1, normal:2 };
+const URG_NAME = { urgent:'Urgent', high:'High', normal:'Normal' };
+const stageName = id => STAGES.find(s => s.id === id).name;
+
+const day = n => { const d = new Date(); d.setHours(17,0,0,0); d.setDate(d.getDate() + n); return d; };
+const fmtDay = d => {
+  const t = new Date(); t.setHours(0,0,0,0);
+  const x = new Date(d); x.setHours(0,0,0,0);
+  const diff = Math.round((x - t) / 864e5);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Tomorrow';
+  if (diff === -1) return 'Yesterday';
+  if (diff < 0) return Math.abs(diff) + ' days late';
+  return x.toLocaleDateString('en-KE', { weekday:'short', day:'numeric', month:'short' });
+};
+const isLate = d => { const t = new Date(); t.setHours(0,0,0,0); return new Date(d) < t; };
+const ago = t => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : Math.round(m/60) + ' h ago'; };
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const $ = s => document.querySelector(s);
+
+/* ---------- state ---------- */
+let seq = 100, rankSeq = 0;
+const S = {
+  workers: [
+    { id:'w1', name:'Otieno',  stage:'metal',  pin:'1234', task:null },
+    { id:'w2', name:'Kamau',   stage:'metal',  pin:'1234', task:null },
+    { id:'w3', name:'Wanjiru', stage:'foam',   pin:'1234', task:null },
+    { id:'w4', name:'Mutua',   stage:'foam',   pin:'1234', task:null },
+    { id:'w5', name:'Achieng', stage:'finish', pin:'1234', task:null },
+    { id:'w6', name:'Kiprop',  stage:'finish', pin:'1234', task:null },
+    { id:'w7', name:'Juma',    stage:'load',   pin:'1234', task:null }
+  ],
+  orders: [], tasks: [], log: []
+};
+const W = id => S.workers.find(w => w.id === id);
+const O = id => S.orders.find(o => o.id === id);
+const T = id => S.tasks.find(t => t.id === id);
+
+function log(text, kind = 'info', link = null){ S.log.unshift({ text, kind, link, at: Date.now() }); S.log = S.log.slice(0, 40); }
+
+/* sort key for the queue: urgency first, then deadline */
+const key = t => { const o = O(t.order); return [URG[o.urgency], +new Date(o.deadline)]; };
+function enqueue(t){
+  t.status = 'queued';
+  const q = queue(t.stage);
+  const k = key(t);
+  let i = q.findIndex(x => { const kx = key(x); return k[0] < kx[0] || (k[0] === kx[0] && k[1] < kx[1]); });
+  if (i === -1) i = q.length;
+  q.splice(i, 0, t);
+  q.forEach((x, n) => x.rank = n);
+}
+const queue = stage => S.tasks.filter(t => t.stage === stage && t.status === 'queued').sort((a,b) => a.rank - b.rank);
+
+/* give free workers in a stage the next job */
+function release(stage, silent){
+  S.workers.filter(w => w.active !== false && w.stage === stage && !w.task).forEach(w => {
+    const next = queue(stage)[0];
+    if (!next) return;
+    next.status = 'assigned'; next.worker = w.id; next.assignedAt = Date.now();
+    w.task = next.id;
+    if (!silent) log(`${w.name} got the next job: ${O(next.order).ref} · ${stageName(stage)}`, 'info', { order: next.order });
+  });
+  S.workers.filter(w => w.active !== false && w.stage === stage && !w.task).forEach(w => {
+    if (!silent && !w.waitLogged){ log(`${w.name} (${stageName(stage)}) has no work waiting`, 'warn'); w.waitLogged = true; setTimeout(() => announce(MSG.waiting(w)), 3500); }
+  });
+}
+
+function createOrder({ customer, item, qty, deadline, urgency, stages, notes }, silent){
+  const o = { id:'o' + (++seq), ref:'KT-' + (1000 + seq), customer, item, qty, deadline, urgency, notes, stages, created: Date.now(), delivered:false };
+  S.orders.push(o);
+  stages.forEach((st, i) => S.tasks.push({ id:'t' + (++seq), order:o.id, stage:st, status: i === 0 ? 'new' : 'waiting', worker:null, rank:0, problem:null }));
+  const first = S.tasks.find(t => t.order === o.id && t.stage === stages[0]);
+  enqueue(first);
+  if (!silent) log(`New order ${o.ref}: ${qty} × ${item} for ${customer}`, urgency === 'urgent' ? 'alert' : 'info', { order:o.id });
+  release(stages[0], silent);
+  return o;
+}
+
+function startTask(t, silent){ t.status = 'working'; t.startedAt = Date.now(); if (!silent) log(`${W(t.worker).name} started ${O(t.order).ref} · ${stageName(t.stage)}`, 'info', { order:t.order }); }
+
+function finishTask(t, silent){
+  const w = W(t.worker), o = O(t.order);
+  t.status = 'done'; t.doneAt = Date.now(); t.problem = null;
+  w.task = null; w.waitLogged = false;
+  if (!silent) log(`${w.name} finished ${o.ref} · ${stageName(t.stage)}`, 'good', { order:o.id });
+  const idx = o.stages.indexOf(t.stage);
+  const nextStage = o.stages[idx + 1];
+  if (!silent) announce(MSG.finished(w, o, nextStage));
+  if (nextStage){
+    const nt = S.tasks.find(x => x.order === o.id && x.stage === nextStage);
+    enqueue(nt);
+    release(nextStage, silent);
+  } else if (!silent) log(`${o.ref} is finished and loaded. Ready for delivery.`, 'good', { order:o.id });
+  release(t.stage, silent);
+}
+
+function orderProgress(o){
+  const ts = S.tasks.filter(t => t.order === o.id);
+  const done = ts.filter(t => t.status === 'done').length;
+  const cur = ts.find(t => t.status !== 'done');
+  return { done, total: ts.length, current: cur, finished: !cur };
+}
+
+function workerStatus(w){
+  if (!w.task) return ['waiting', 'Waiting for work'];
+  const t = T(w.task);
+  if (t.problem) return ['attention', 'Needs attention'];
+  if (t.status === 'working') return ['working', 'Working'];
+  return ['notstarted', 'Not started'];
+}
+
+/* ---------- sample data (clearly fake) ---------- */
+(function seed(){
+  const all = STAGES.map(s => s.id);
+  // [order, how many steps already finished]
+  const plan = [
+    [{ customer:'Sample Café, Westlands',     item:'Bar stools',               qty:12,  deadline:day(-1), urgency:'high',   stages:all, notes:'Black frames, red seats. Customer collects.' }, 2],
+    [{ customer:'Sample Hospital, Thika',     item:'4-seater waiting benches', qty:15,  deadline:day(1),  urgency:'urgent', stages:['metal','finish','load'] }, 1],
+    [{ customer:'Sample Hotel, Nakuru',       item:'Restaurant dining chairs', qty:40,  deadline:day(3),  urgency:'high',   stages:all, notes:'Match the sample chair in the showroom.' }, 1],
+    [{ customer:'Sample Restaurant, Kasarani',item:'High table sets',          qty:8,   deadline:day(2),  urgency:'normal', stages:all }, 3],
+    [{ customer:'Sample Church, Embakasi',    item:'Church chairs',            qty:120, deadline:day(9),  urgency:'normal', stages:all }, 0],
+    [{ customer:'Sample Bank, CBD',           item:'5-seater waiting benches', qty:10,  deadline:day(5),  urgency:'normal', stages:['metal','finish','load'] }, 0],
+    [{ customer:'Sample School, Kitengela',   item:'School desks and chairs',  qty:60,  deadline:day(14), urgency:'normal', stages:['metal','finish','load'] }, 0]
+  ];
+  plan.forEach(([d, n]) => {
+    const o = { id:'o' + (++seq), ref:'KT-' + (1000 + seq), ...d, created: Date.now(), delivered:false };
+    S.orders.push(o);
+    o.stages.forEach((st, i) => {
+      const t = { id:'t' + (++seq), order:o.id, stage:st, status: i < n ? 'done' : 'waiting', worker:null, rank:0, problem:null };
+      S.tasks.push(t);
+      if (i === n) enqueue(t);
+    });
+  });
+  STAGES.forEach(s => release(s.id, true));
+  // most people have already started; one job given but not started yet
+  S.tasks.filter(t => t.status === 'assigned').forEach((t, i) => { if (i !== 1) startTask(t, true); });
+  const p = S.tasks.find(t => t.status === 'working' && t.stage === 'foam');
+  if (p) p.problem = { reason:'Material missing', at: Date.now() - 18 * 60000, stopped:false, ack:false };
+  S.log = [];
+  log('Sample data loaded. These are demo orders, not real customers.', 'info');
+  S.tasks.filter(t => t.status === 'working').slice(0, 3).forEach(t => log(`${W(t.worker).name} started ${O(t.order).ref} · ${stageName(t.stage)}`, 'info'));
+  if (p) log(`${W(p.worker).name} reported a problem on ${O(p.order).ref}: Material missing`, 'alert', { order:p.order });
+  S.workers.filter(w => w.active !== false && !w.task).forEach(w => { log(`${w.name} (${stageName(w.stage)}) has no work waiting`, 'warn'); w.waitLogged = true; });
+})();
+
+/* ---------- escalation: when work has STOPPED ----------
+   Real version: 1) loud alarm on her phone/PC  2) SMS after 3 min  3) automated phone call after 8 min.
+   Demo is sped up so you can watch it happen. */
+const ESC = { sms: 20, call: 40 };          // seconds in the demo
+const ESC_REAL = { sms: '3 min', call: '8 min' };
+let muted = false, beepT = null, actx = null;
+const stoppedOpen = () => S.tasks.filter(t => t.problem && t.problem.stopped && !t.problem.ack);
+const secs = t => Math.floor((Date.now() - t.problem.at) / 1000);
+const mmss = n => Math.floor(n / 60) + ':' + String(n % 60).padStart(2, '0');
+
+function beep(){
+  /* siren: a loud rising-and-falling wail, plus a long buzz on phones that can vibrate */
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    const now = actx.currentTime;
+    const o = actx.createOscillator(), o2 = actx.createOscillator(), g = actx.createGain();
+    o.type = 'sawtooth'; o2.type = 'square';
+    [o, o2].forEach((osc, i) => {
+      const f = i ? 1.5 : 1;
+      osc.frequency.setValueAtTime(650 * f, now);
+      osc.frequency.linearRampToValueAtTime(1350 * f, now + .55);
+      osc.frequency.linearRampToValueAtTime(650 * f, now + 1.1);
+      osc.connect(g);
+    });
+    g.gain.setValueAtTime(.0001, now);
+    g.gain.exponentialRampToValueAtTime(.5, now + .05);
+    g.gain.setValueAtTime(.5, now + 1.0);
+    g.gain.exponentialRampToValueAtTime(.0001, now + 1.15);
+    g.connect(actx.destination);
+    o.start(now); o2.start(now); o.stop(now + 1.2); o2.stop(now + 1.2);
+  } catch(e){}
+  if (navigator.vibrate) navigator.vibrate([700, 150, 700, 150, 700]);
+}
+
+/* ---------- VOICE: the phone reads alerts out loud (built into the phone, free) ---------- */
+const VOICE = { lang: 'en', small: true, name: { en: null, sw: null } };
+try { const sv = JSON.parse(localStorage.getItem('kt-voice') || 'null'); if (sv) Object.assign(VOICE, sv); } catch(e){}
+const saveVoice = () => { try { localStorage.setItem('kt-voice', JSON.stringify(VOICE)); } catch(e){} };          // lang: 'en' | 'sw' | 'off'
+const SW_REASON = { 'Material missing':'Vifaa vimeisha', 'Machine problem':'Mashine ina shida', 'Need instructions':'Anahitaji maelekezo', 'Something else':'Kuna shida nyingine' };
+const SW_STAGE = { metal:'kazi ya chuma', foam:'foam na ushonaji', finish:'umaliziaji', load:'upakiaji' };
+const sayRef = ref => ref.replace('KT-', 'K T ').split('').join(' ').replace(/\s+/g, ' ');   // "K T 1 1 0 1": read digit by digit
+// Best-sounding voices first: Microsoft "Natural" voices (Edge), then Google voices (Chrome / Android)
+function voicesFor(lang){
+  const vs = window.speechSynthesis ? speechSynthesis.getVoices() : [];
+  const want = lang === 'sw' ? ['sw-ke','sw-tz','sw'] : ['en-ke','en-gb','en-us','en'];
+  const score = v => { const n = v.name.toLowerCase(); const l = (v.lang || '').replace('_','-').toLowerCase();
+    const li = want.findIndex(w => l.startsWith(w)); if (li < 0) return -1;
+    return (n.includes('natural') ? 300 : n.includes('online') ? 200 : n.includes('google') ? 150 : 0) + (10 - li) * 10; };
+  return vs.filter(v => score(v) >= 0).sort((x, y) => score(y) - score(x));
+}
+function pickVoice(lang){
+  const list = voicesFor(lang);
+  return list.find(v => v.name === VOICE.name[lang]) || list[0] || null;
+}
+function say(text, opts){
+  if (VOICE.lang === 'off' || !window.speechSynthesis) return;
+  const u = new SpeechSynthesisUtterance(text);
+  const v = pickVoice(VOICE.lang); if (v){ u.voice = v; u.lang = v.lang; } else u.lang = VOICE.lang === 'sw' ? 'sw-KE' : 'en-GB';
+  u.rate = .92; u.pitch = 1; u.volume = 1;
+  if (opts && opts.interrupt) speechSynthesis.cancel();
+  speechSynthesis.speak(u);
+}
+const MSG = {
+  stopped: (w, t, o) => VOICE.lang === 'sw'
+    ? `Tahadhari. ${w.name} amesimama kazi. ${SW_REASON[t.problem.reason] || t.problem.reason}. Oda ${sayRef(o.ref)}.`
+    : `Alert. ${w.name} has stopped work. ${t.problem.reason}. Order ${sayRef(o.ref)}, ${stageName(t.stage)}.`,
+  problem: (w, t, o) => VOICE.lang === 'sw'
+    ? `${w.name} ana shida. ${SW_REASON[t.problem.reason] || t.problem.reason}. Bado anaendelea na kazi.`
+    : `${w.name} reported a problem. ${t.problem.reason}. They are still working.`,
+  finished: (w, o, next) => VOICE.lang === 'sw'
+    ? `${w.name} amemaliza ${o.item}. ${next ? 'Imeenda ' + SW_STAGE[next] + '.' : 'Iko tayari kupelekwa.'}`
+    : `${w.name} finished the ${o.item.toLowerCase()}. ${next ? 'It has gone to ' + stageName(next) + '.' : 'It is ready for delivery.'}`,
+  waiting: w => VOICE.lang === 'sw' ? `${w.name} anasubiri kazi.` : `${w.name} is waiting for work.`,
+  test: () => VOICE.lang === 'sw' ? 'Habari. Hii ni sauti ya Kartech.' : 'Hello. This is the Kartech voice.'
+};
+const announce = text => { if (VOICE.small) say(text); };
+if (window.speechSynthesis) speechSynthesis.onvoiceschanged = () => { if (typeof tab !== 'undefined' && tab === 'today' && !document.querySelector('.scrim')) render(); };   // voice list loads a moment after the page
+
+function escalate(){
+  stoppedOpen().forEach(t => {
+    const n = secs(t), w = W(t.worker), o = O(t.order);
+  });
+  alarmRender();
+}
+
+function alarmRender(){
+  const list = stoppedOpen();
+  const ownerOn = !$('#owner').classList.contains('hidden');
+  $('#swOwner').classList.toggle('ring', list.length > 0 && !ownerOn);
+  const el = $('#alarm');
+  if (!list.length || !ownerOn){ el.classList.add('hidden'); if (beepT && window.speechSynthesis) speechSynthesis.cancel(); clearInterval(beepT); beepT = null; return; }
+  const t = list[0], w = W(t.worker), o = O(t.order), n = secs(t);
+  const step = (label, at, done, real) => `<div><span class="${done ? 'ok' : 'soon'}">${done ? '✓' : '○'} ${label}</span><span class="${done ? 'ok' : 'soon'}">${done ? 'sent' : 'in ' + mmss(Math.max(0, at - n))}  <small style="opacity:.7">(real: ${real})</small></span></div>`;
+  el.innerHTML = `<button class="mute" id="muteBtn">${muted ? '🔇 Sound off' : '🔊 Sound on'}</button><div class="box">
+    <p class="tag">⚠ WORK HAS STOPPED</p>
+    <h1>${esc(t.problem.reason)}</h1>
+    <p class="who"><b>${esc(w.name)}</b> · ${stageName(t.stage)} · ${o.ref}</p>
+    <p class="timer">${o.qty} × ${esc(o.item)} · waiting ${mmss(n)}</p>
+    <div class="ladder">
+      <div><span class="ok">✓ Siren + vibration</span><span class="ok">now</span></div>
+      <div><span class="${VOICE.lang === 'off' ? 'soon' : 'ok'}">${VOICE.lang === 'off' ? '○' : '✓'} Voice reads it out</span><span class="${VOICE.lang === 'off' ? 'soon' : 'ok'}">${VOICE.lang === 'off' ? 'off' : VOICE.lang === 'sw' ? 'Kiswahili' : 'English'}</span></div>
+      <div><span class="soon">○ Phone notification when locked</span><span class="soon">real version</span></div>
+    </div>
+    <button class="giant ack" data-ack="${t.id}">I'M ON IT</button>
+    <p class="more">Tapping this stops the alarm and tells ${esc(w.name)} you've seen it.${list.length > 1 ? ` <b>${list.length - 1} more waiting.</b>` : ''}</p>
+  </div>`;
+  el.classList.remove('hidden');
+  if (!beepT && !muted){ const cycle = () => { if (muted) return; const a = stoppedOpen()[0]; if (!a) return; beep(); setTimeout(() => { const x = stoppedOpen()[0]; if (x && !muted) say(MSG.stopped(W(x.worker), x, O(x.order)), { interrupt:true }); }, 1400); }; cycle(); beepT = setInterval(cycle, 7500); }
+}
+setInterval(escalate, 1000);
+document.addEventListener('click', e => {
+  const vl = e.target.closest('[data-vlang]'); if (vl){ VOICE.lang = vl.dataset.vlang; saveVoice(); render(); say(MSG.test(), { interrupt:true }); return; }
+  if (e.target.closest('#vTest')){ say(MSG.test(), { interrupt:true }); return; }
+  if (e.target.id === 'vSmall'){ VOICE.small = e.target.checked; saveVoice(); return; }
+  if (e.target.closest('#muteBtn')){ muted = !muted; if (muted){ clearInterval(beepT); beepT = null; if (navigator.vibrate) navigator.vibrate(0); if (window.speechSynthesis) speechSynthesis.cancel(); } alarmRender(); return; }
+  const a = e.target.closest('[data-ack]'); if (!a) return;
+  const t = T(a.dataset.ack); t.problem.ack = Date.now(); if (navigator.vibrate) navigator.vibrate(0); if (window.speechSynthesis) speechSynthesis.cancel();
+  log(`Owner is on it: ${W(t.worker).name}, ${O(t.order).ref} (${t.problem.reason})`, 'good', { order:t.order });
+  toast(`${W(t.worker).name} has been told you're on it`);
+  alarmRender(); render(); if (me) stRender();
+});
+
+document.addEventListener('change', e => { if (e.target.id === 'vName'){ VOICE.name[VOICE.lang] = e.target.value; saveVoice(); say(MSG.test(), { interrupt:true }); } });
+
+/* ---------- toast ---------- */
+let toastT;
+function toast(m){ const el = $('#toast'); el.textContent = m; el.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove('show'), 2600); }
+
+/* =====================================================================
+   OWNER
+   ===================================================================== */
+let tab = 'today';
+document.querySelectorAll('.tabs [data-tab]').forEach(b => b.addEventListener('click', () => { tab = b.dataset.tab; render(); window.scrollTo(0,0); }));
+$('#newOrderBtn').onclick = $('#fab').onclick = () => newOrderModal();
+
+function attention(){
+  const items = [];
+  S.tasks.filter(t => t.problem).forEach(t => items.push({ lvl:'red', title:`${t.problem.stopped ? 'WORK STOPPED' : 'Problem'}: ${t.problem.reason}${t.problem.stopped && t.problem.ack ? ' (you\'re on it)' : ''}`, sub:`${W(t.worker).name} · ${O(t.order).ref} · ${stageName(t.stage)} · ${ago(t.problem.at)}`, act:`<button class="btn sm" data-solve="${t.id}">Mark solved</button>` }));
+  S.orders.filter(o => !o.delivered && !orderProgress(o).finished && isLate(o.deadline)).forEach(o => items.push({ lvl:'red', title:`${o.ref} is past its deadline`, sub:`${o.qty} × ${o.item} · ${o.customer}`, act:`<button class="btn sm line" data-open="${o.id}">Open</button>` }));
+  S.workers.filter(w => w.active !== false && !w.task).forEach(w => items.push({ lvl:'amber', title:`${w.name} is waiting for work`, sub:`${stageName(w.stage)} · nothing in the queue`, act:`<button class="btn sm line" data-tabgo="workshop">See workshop</button>` }));
+  S.orders.filter(o => !o.delivered && o.urgency === 'urgent' && !orderProgress(o).finished && !isLate(o.deadline)).forEach(o => items.push({ lvl:'amber', title:`Urgent: ${o.ref} due ${fmtDay(o.deadline).toLowerCase()}`, sub:`${o.qty} × ${o.item} · now at ${stageName(orderProgress(o).current.stage)}`, act:`<button class="btn sm line" data-open="${o.id}">Open</button>` }));
+  S.orders.filter(o => !o.delivered && orderProgress(o).finished).forEach(o => items.push({ lvl:'green', title:`${o.ref} is loaded and ready`, sub:`${o.customer} · confirm delivery when it leaves`, act:`<button class="btn sm" data-deliver="${o.id}">Mark delivered</button>` }));
+  return items;
+}
+
+function viewToday(){
+  const att = attention();
+  const working = S.workers.filter(w => workerStatus(w)[0] === 'working').length;
+  const waiting = S.workers.filter(w => w.active !== false && !w.task).length;
+  const probs = S.tasks.filter(t => t.problem).length;
+  const late = S.orders.filter(o => !o.delivered && !orderProgress(o).finished && isLate(o.deadline)).length;
+  return `
+    <h2>Good ${new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}</h2>
+    <p class="sub">What needs you right now. Everything else is running on its own.</p>
+    <div class="list" style="margin-bottom:18px"><div class="item" style="flex-wrap:wrap">
+      <div class="grow"><div class="t">🔊 Voice</div><div class="s">The phone reads alerts out loud.</div></div>
+      <div class="seg-pick" id="vLang" style="min-width:260px">${['en','sw','off'].map(l => `<button type="button" data-vlang="${l}" class="${VOICE.lang === l ? 'on' : ''}">${l === 'en' ? 'English' : l === 'sw' ? 'Kiswahili' : 'Off'}</button>`).join('')}</div>
+      ${VOICE.lang !== 'off' && voicesFor(VOICE.lang).length ? `<select id="vName" style="padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:#fff;max-width:260px">${voicesFor(VOICE.lang).map(v => `<option value="${esc(v.name)}" ${pickVoice(VOICE.lang) === v ? 'selected' : ''}>${esc(v.name.replace(/^Microsoft /,'').replace(/ - .*$/,'').replace(/ Online \(Natural\)/,' (natural)'))} · ${esc(v.lang)}</option>`).join('')}</select>` : ''}
+      <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="vSmall" ${VOICE.small ? 'checked' : ''} style="accent-color:var(--green)"> Also read small updates</label>
+      <button class="btn sm line" id="vTest">Test voice</button>
+    </div></div>
+    <div class="cards">
+      <button class="stat ${probs ? 'alert' : ''}" data-tabgo="workshop"><b>${probs}</b><span>Problems reported</span></button>
+      <button class="stat ${waiting ? 'warn' : ''}" data-tabgo="workshop"><b>${waiting}</b><span>Waiting for work</span></button>
+      <button class="stat ${late ? 'alert' : ''}" data-tabgo="orders"><b>${late}</b><span>Orders past deadline</span></button>
+      <button class="stat" data-tabgo="workshop"><b>${working}/${S.workers.filter(w => w.active !== false).length}</b><span>Workers busy</span></button>
+    </div>
+    <p class="section-title">Needs your attention</p>
+    <div class="list">${att.length ? att.map(a => `
+      <div class="item"><span class="dot ${a.lvl}"></span><div class="grow"><div class="t">${esc(a.title)}</div><div class="s">${esc(a.sub)}</div></div>${a.act}</div>`).join('') : '<p class="empty">Nothing needs you. The workshop is running. ✓</p>'}</div>
+    <p class="section-title">Latest from the workshop</p>
+    <div class="list feed">${S.log.slice(0, 10).map(l => `
+      <div class="item"><span class="dot ${l.kind === 'alert' ? 'red' : l.kind === 'warn' ? 'amber' : l.kind === 'good' ? 'green' : 'grey'}"></span><div class="grow">${esc(l.text)}</div><span class="when">${ago(l.at)}</span></div>`).join('')}</div>`;
+}
+
+function pipe(o){
+  const ts = S.tasks.filter(t => t.order === o.id);
+  return `<div class="pipe">${STAGES.map(s => {
+    const t = ts.find(x => x.stage === s.id);
+    const cls = !t ? 'skip' : t.status === 'done' ? 'done' : (t.status === 'working' || t.status === 'assigned') ? 'now' : '';
+    const label = !t ? 'not needed' : s.short;
+    return `<div class="seg ${cls}"><i></i><em>${label}</em></div>`;
+  }).join('')}</div>`;
+}
+
+function viewOrders(){
+  const active = S.orders.filter(o => !o.delivered).sort((a,b) => URG[a.urgency] - URG[b.urgency] || new Date(a.deadline) - new Date(b.deadline));
+  const delivered = S.orders.filter(o => o.delivered);
+  const row = o => { const p = orderProgress(o); const late = !p.finished && isLate(o.deadline);
+    return `<button class="order" data-open="${o.id}">
+      <div><div class="ref">${o.ref} <span class="pill p-${o.urgency}">${URG_NAME[o.urgency]}</span></div><div class="s" style="color:var(--muted);font-size:13px">${o.qty} × ${esc(o.item)} · ${esc(o.customer)}</div></div>
+      ${pipe(o)}
+      <div class="due ${late ? 'late' : ''}">${o.delivered ? 'Delivered' : p.finished ? '<span class="pill p-done">Ready</span>' : 'Due ' + fmtDay(o.deadline)}</div>
+    </button>`; };
+  return `
+    <h2>Orders</h2>
+    <p class="sub">Most urgent first. Tap an order to see who's on it.</p>
+    <div class="list">${active.length ? active.map(row).join('') : '<p class="empty">No open orders.</p>'}</div>
+    ${delivered.length ? `<p class="section-title">Delivered</p><div class="list">${delivered.map(row).join('')}</div>` : ''}`;
+}
+
+function viewWorkshop(){
+  return `
+    <h2>Workshop</h2>
+    <p class="sub">Each step has its own line of jobs. When someone finishes, they get the top job automatically. Use ▲▼ to change the order.</p>
+    <div class="board">${STAGES.map(s => {
+      const ws = S.workers.filter(w => w.active !== false && w.stage === s.id);
+      const q = queue(s.id);
+      return `<div class="col">
+        <h3>${s.name}</h3><p class="s">${ws.length} worker${ws.length === 1 ? '' : 's'} · ${q.length} waiting</p>
+        ${ws.map(w => { const [k, label] = workerStatus(w); const t = w.task && T(w.task);
+          return `<div class="wk"><div class="n">${esc(w.name)} <span class="pill p-${k}">${label}</span></div>
+            <div class="c">${t ? `${O(t.order).ref} · ${O(t.order).qty} × ${esc(O(t.order).item)}${t.problem ? `<br><b style="color:var(--red)">⚠ ${esc(t.problem.reason)}</b> <button class="btn sm" style="margin-top:6px" data-solve="${t.id}">Mark solved</button>` : ''}` : 'Free. Will get the next job that arrives.'}</div></div>`; }).join('')}
+        <p class="q-label">UP NEXT</p>
+        ${q.length ? q.map((t, i) => { const o = O(t.order); return `<div class="q">
+          <span class="num">${i + 1}</span>
+          <div class="grow"><b>${o.ref} <span class="pill p-${o.urgency}">${URG_NAME[o.urgency]}</span></b>${o.qty} × ${esc(o.item)} · due ${fmtDay(o.deadline).toLowerCase()}</div>
+          <button class="mini" data-up="${t.id}" ${i === 0 ? 'disabled' : ''} aria-label="Move up">▲</button>
+          <button class="mini" data-down="${t.id}" ${i === q.length - 1 ? 'disabled' : ''} aria-label="Move down">▼</button>
+        </div>`; }).join('') : '<p class="s" style="color:var(--muted);font-size:13px">Nothing waiting.</p>'}
+      </div>`; }).join('')}</div>`;
+}
+
+function viewWorkers(){
+  const row = w => { const [k, l] = w.active === false ? ['normal','Switched off'] : workerStatus(w); const t = w.task && T(w.task);
+    return `<div class="item"><div class="grow"><div class="t">${esc(w.name)} <span class="pill p-${k}">${l}</span></div>
+      <div class="s">${stageName(w.stage)} · ID ${w.id.toUpperCase()} · PIN ••••${t ? ` · on ${O(t.order).ref}` : ''}</div></div>
+      <button class="btn sm line" data-editw="${w.id}">Edit</button></div>`; };
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:end;gap:12px;flex-wrap:wrap"><div><h2>Workers</h2>
+    <p class="sub" style="margin-bottom:0">Each worker signs in on the workshop PC with their own PIN.</p></div>
+    <button class="btn" data-addw>+ Add worker</button></div>
+    ${STAGES.map(s => { const ws = S.workers.filter(w => w.stage === s.id); return `<p class="section-title">${s.name}</p>
+      <div class="list">${ws.length ? ws.map(row).join('') : '<p class="empty">No one in this step yet.</p>'}</div>`; }).join('')}`;
+}
+
+function workerModal(id){
+  const w = id ? W(id) : null;
+  const s = openModal(`
+    <h2>${w ? 'Edit ' + esc(w.name) : 'Add a worker'}</h2>
+    <label class="field"><span>Name</span><input id="wName" value="${w ? esc(w.name) : ''}" placeholder="e.g. Odhiambo" autocomplete="off"></label>
+    <label class="field"><span>Works in</span><select id="wStage" ${w && w.task ? 'disabled' : ''}>${STAGES.map(st => `<option value="${st.id}" ${w && w.stage === st.id ? 'selected' : ''}>${st.name}</option>`).join('')}</select>
+      ${w && w.task ? '<small style="color:var(--muted)">Can change step once their current job is finished.</small>' : ''}</label>
+    <label class="field"><span>${w ? 'New PIN (leave empty to keep the old one)' : '4-digit PIN'}</span><input id="wPin" inputmode="numeric" maxlength="4" placeholder="e.g. 4821" autocomplete="off"></label>
+    <p id="wErr" style="color:var(--red);min-height:20px;font-size:13px"></p>
+    <div class="actions" style="justify-content:space-between">
+      ${w ? `<button class="btn ${w.active === false ? '' : 'red'}" id="wToggle">${w.active === false ? 'Switch back on' : 'Switch off'}</button>` : '<span></span>'}
+      <span style="display:flex;gap:8px"><button class="btn line" data-x>Cancel</button><button class="btn" id="wSave">Save</button></span>
+    </div>`);
+  s.querySelector('#wSave').onclick = () => {
+    const name = s.querySelector('#wName').value.trim(), stage = s.querySelector('#wStage').value, pinv = s.querySelector('#wPin').value.trim();
+    if (!name) return s.querySelector('#wErr').textContent = 'Add a name.';
+    if ((!w || pinv) && !/^\d{4}$/.test(pinv)) return s.querySelector('#wErr').textContent = 'The PIN must be exactly 4 numbers.';
+    if (w){ const moved = !w.task && w.stage !== stage; w.name = name; if (!w.task) w.stage = stage; if (pinv) w.pin = pinv;
+      log(`Worker updated: ${name}${moved ? ' moved to ' + stageName(stage) : ''}${pinv ? ' (new PIN)' : ''}`, 'info'); if (moved) release(stage); }
+    else { const nw = { id:'w' + (++seq), name, stage, pin: pinv, task:null, active:true }; S.workers.push(nw); log(`New worker added: ${name}, ${stageName(stage)}`, 'good'); release(stage); }
+    closeModal(); render(); toast('Saved');
+  };
+  const tg = s.querySelector('#wToggle');
+  if (tg) tg.onclick = () => {
+    if (w.active === false){ w.active = true; log(`${w.name} switched back on`, 'info'); release(w.stage); }
+    else {
+      if (w.task){ const t = T(w.task); t.worker = null; t.problem = null; t.status = 'queued'; const q = queue(t.stage).filter(x => x !== t); q.unshift(t); q.forEach((x,n)=>x.rank=n); w.task = null; }
+      w.active = false; log(`${w.name} switched off. Can no longer sign in.`, 'warn'); release(w.stage);
+    }
+    closeModal(); render(); toast('Saved');
+  };
+}
+
+function render(){
+  document.querySelectorAll('.tabs [data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
+  const n = attention().filter(a => a.lvl === 'red').length;
+  $('#attnBadge').textContent = n || ''; $('#attnBadge').style.display = n ? '' : 'none';
+  $('#view').innerHTML = tab === 'today' ? viewToday() : tab === 'orders' ? viewOrders() : tab === 'workers' ? viewWorkers() : viewWorkshop();
+}
+
+/* owner clicks */
+document.addEventListener('click', e => {
+  if (e.target.closest('[data-addw]')) return workerModal();
+  const ew = e.target.closest('[data-editw]'); if (ew) return workerModal(ew.dataset.editw);
+  const b = e.target.closest('[data-tabgo],[data-open],[data-solve],[data-deliver],[data-up],[data-down]');
+  if (!b) return;
+  if (b.dataset.tabgo){ tab = b.dataset.tabgo; render(); window.scrollTo(0,0); }
+  else if (b.dataset.open) orderModal(b.dataset.open);
+  else if (b.dataset.solve){ const t = T(b.dataset.solve); log(`Problem solved for ${W(t.worker).name} on ${O(t.order).ref}`, 'good', { order:t.order }); t.problem = null; toast(`${W(t.worker).name} can carry on`); closeModal(); render(); alarmRender(); }
+  else if (b.dataset.deliver){ const o = O(b.dataset.deliver); o.delivered = true; log(`${o.ref} delivered to ${o.customer}`, 'good'); toast(`${o.ref} marked delivered`); closeModal(); render(); }
+  else if (b.dataset.up || b.dataset.down){
+    const t = T(b.dataset.up || b.dataset.down); const q = queue(t.stage); const i = q.indexOf(t); const j = b.dataset.up ? i - 1 : i + 1;
+    [q[i], q[j]] = [q[j], q[i]]; q.forEach((x, n) => x.rank = n);
+    log(`Queue changed in ${stageName(t.stage)}: ${O(t.order).ref} moved ${b.dataset.up ? 'up' : 'down'}`, 'info');
+    render();
+  }
+});
+
+/* ---------- modals ---------- */
+function closeModal(){ document.querySelector('.scrim')?.remove(); }
+function openModal(html){ closeModal(); const s = document.createElement('div'); s.className = 'scrim'; s.innerHTML = `<div class="modal">${html}</div>`; s.addEventListener('click', e => { if (e.target === s || e.target.closest('[data-x]')) closeModal(); }); document.body.appendChild(s); return s; }
+
+function newOrderModal(){
+  const d = day(7); const iso = d.toISOString().slice(0,10);
+  const s = openModal(`
+    <h2>New order</h2>
+    <label class="field"><span>Customer</span><input id="fCust" placeholder="e.g. Mama Oliech Restaurant" autocomplete="off"></label>
+    <div class="row2">
+      <label class="field"><span>What</span><input id="fItem" placeholder="e.g. Bar stools" autocomplete="off"></label>
+      <label class="field"><span>How many</span><input id="fQty" type="number" min="1" value="10"></label>
+    </div>
+    <label class="field"><span>Deadline</span><input id="fDate" type="date" value="${iso}"></label>
+    <label class="field"><span>Note for the workshop (optional)</span><textarea id="fNote" rows="2" placeholder="e.g. Black frames, red seats. Customer collects."></textarea></label>
+    <div class="field"><span>How urgent</span><div class="seg-pick" id="fUrg">
+      <button type="button" data-u="normal" class="on">Normal</button><button type="button" data-u="high">High</button><button type="button" data-u="urgent">Urgent</button></div></div>
+    <div class="field"><span>Steps it needs</span><div class="checks">${STAGES.map(st => `<label><input type="checkbox" value="${st.id}" checked> ${st.name}</label>`).join('')}</div></div>
+    <p id="fErr" style="color:var(--red);min-height:20px;font-size:13px"></p>
+    <div class="actions"><button class="btn line" data-x>Cancel</button><button class="btn" id="fSave">Add to workshop</button></div>`);
+  let urg = 'normal';
+  s.querySelector('#fUrg').addEventListener('click', e => { const b = e.target.closest('[data-u]'); if (!b) return; urg = b.dataset.u; s.querySelectorAll('#fUrg button').forEach(x => x.classList.toggle('on', x === b)); });
+  s.querySelector('#fSave').onclick = () => {
+    const customer = s.querySelector('#fCust').value.trim(), item = s.querySelector('#fItem').value.trim();
+    const qty = parseInt(s.querySelector('#fQty').value, 10) || 0;
+    const stages = [...s.querySelectorAll('.checks input:checked')].map(x => x.value);
+    if (!customer || !item || qty < 1) return s.querySelector('#fErr').textContent = 'Fill in the customer, what, and how many.';
+    if (!stages.length) return s.querySelector('#fErr').textContent = 'Pick at least one step.';
+    const dl = new Date(s.querySelector('#fDate').value + 'T17:00');
+    const o = createOrder({ customer, item, qty, deadline: isNaN(dl) ? day(7) : dl, urgency: urg, stages, notes: s.querySelector('#fNote').value.trim() });
+    closeModal(); tab = 'orders'; render();
+    const t = S.tasks.find(x => x.order === o.id && x.worker);
+    toast(t ? `${o.ref} added. ${W(t.worker).name} has it now.` : `${o.ref} added. It's #${queue(stages[0]).findIndex(x => x.order === o.id) + 1} in ${stageName(stages[0])}.`);
+  };
+  setTimeout(() => s.querySelector('#fCust').focus(), 50);
+}
+
+function orderModal(id){
+  const o = O(id); const p = orderProgress(o);
+  const ts = o.stages.map(st => S.tasks.find(t => t.order === o.id && t.stage === st));
+  const lbl = t => t.status === 'done' ? ['done','Done'] : t.status === 'working' ? (t.problem ? ['attention','Problem'] : ['working','In progress']) : t.status === 'assigned' ? ['notstarted','Given, not started'] : t.status === 'queued' ? ['waiting', `#${queue(t.stage).indexOf(t) + 1} in line`] : ['normal','Later'];
+  openModal(`
+    <div style="display:flex;justify-content:space-between;align-items:start;gap:10px"><div><h2 style="margin:0">${o.ref}</h2><p class="sub" style="margin:2px 0 0">${esc(o.customer)}</p></div><span class="pill p-${o.urgency}">${URG_NAME[o.urgency]}</span></div>
+    <p style="margin:14px 0 4px;font-size:17px"><b>${o.qty} × ${esc(o.item)}</b></p>
+    ${o.notes ? `<p style="margin:6px 0;padding:10px 12px;background:#fff;border:1px solid var(--line);border-radius:6px">📝 ${esc(o.notes)}</p>` : ''}
+    <p class="${!p.finished && isLate(o.deadline) ? 'due late' : ''}" style="text-align:left">Deadline: ${fmtDay(o.deadline)}</p>
+    <div style="margin:14px 0">${pipe(o)}</div>
+    <div class="steps">${ts.map(t => { const [k, l] = lbl(t); return `<div class="step"><div style="flex:1"><b>${stageName(t.stage)}</b><div style="color:var(--muted);font-size:13px">${t.worker ? esc(W(t.worker).name) : 'Not given to anyone yet'}${t.problem ? ` · ⚠ ${esc(t.problem.reason)}` : ''}</div></div><span class="pill p-${k}">${l}</span>${t.problem ? `<button class="btn sm" data-solve="${t.id}">Solved</button>` : ''}</div>`; }).join('')}</div>
+    ${!o.delivered && o.urgency !== 'urgent' && !p.finished ? `<p style="margin-top:14px;font-size:13px;color:var(--muted)">Customer pushing? Make it urgent and it jumps to the front of every line. No one's current job gets interrupted.</p>` : ''}
+    <div class="actions">
+      ${!o.delivered && o.urgency !== 'urgent' && !p.finished ? `<button class="btn red" id="mkUrgent">Make urgent</button>` : ''}
+      ${p.finished && !o.delivered ? `<button class="btn" data-deliver="${o.id}">Mark delivered</button>` : ''}
+      <button class="btn line" data-x>Close</button>
+    </div>`);
+  const u = $('#mkUrgent');
+  if (u) u.onclick = () => {
+    o.urgency = 'urgent';
+    S.tasks.filter(t => t.order === o.id && t.status === 'queued').forEach(t => { t.status = 'tmp'; enqueue(t); });
+    log(`${o.ref} made urgent. Moved to the front of the line.`, 'alert', { order:o.id });
+    toast(`${o.ref} is now urgent`); closeModal(); render();
+  };
+}
+
+/* =====================================================================
+   WORKSHOP COMPUTER (station)
+   ===================================================================== */
+let me = null, pin = '', pinFor = null, probOpen = false, probReason = null, idleT, idleLeft = 0;
+const IDLE_SECONDS = 60;
+
+function stRender(){
+  const v = $('#stView');
+  if (!pinFor && !me){
+    v.innerHTML = `<h1>Who's working?</h1><p class="lead">Tap your name.</p>
+      ${STAGES.map(s => `<div class="st-group"><h4>${s.name.toUpperCase()}</h4><div class="names">${S.workers.filter(w => w.active !== false && w.stage === s.id).map(w => `<button class="name" data-who="${w.id}">${esc(w.name)}</button>`).join('')}</div></div>`).join('')}
+      <p class="hint">Demo: every PIN is 1234</p>`;
+    return;
+  }
+  if (pinFor && !me){
+    const w = W(pinFor);
+    v.innerHTML = `<div class="pinbox"><h1>Hi ${esc(w.name)}</h1><p class="lead">Enter your PIN</p>
+      <div class="pindots">${[0,1,2,3].map(i => `<i class="${i < pin.length ? 'on' : ''}"></i>`).join('')}</div>
+      <div class="pad">${[1,2,3,4,5,6,7,8,9].map(n => `<button data-k="${n}">${n}</button>`).join('')}<button data-k="back" style="font-size:18px">Back</button><button data-k="0">0</button><button data-k="del" style="font-size:18px">⌫</button></div>
+      <p class="err" id="pinErr"></p><p class="hint">Demo PIN: 1234</p></div>`;
+    return;
+  }
+  const w = W(me); const t = w.task && T(w.task);
+  const next = queue(w.stage)[0];
+  let body;
+  if (!t){
+    body = `<div class="nowork"><p class="big">No job right now</p><p style="color:#B9B8B2;font-size:17px">The owner has been told. Your next job will show here as soon as it's ready.</p></div>`;
+  } else {
+    const o = O(t.order);
+    const stIdx = o.stages.indexOf(t.stage); const after = o.stages[stIdx + 1];
+    body = `<div class="task">
+      <p class="k">${stageName(t.stage).toUpperCase()} · ${o.ref}</p>
+      <p class="big">${o.qty} × ${esc(o.item)}</p>
+      ${o.notes ? `<div class="note" style="font-size:19px">📝 ${esc(o.notes)}</div>` : ''}
+      <div class="meta"><span><span class="pill p-${o.urgency}">${URG_NAME[o.urgency]}</span></span><span>Due <b>${fmtDay(o.deadline)}</b></span><span>Then goes to: <b>${after ? stageName(after) : 'Delivery'}</b></span></div>
+      ${t.problem ? `<div class="note" style="border-color:var(--red);color:var(--red)">⚠ You reported: <b>${esc(t.problem.reason)}</b>${t.problem.stopped ? ' · work stopped' : ''}.<br>${t.problem.ack ? '<b style="color:var(--green)">✓ The owner has seen this and is on it.</b>' : t.problem.stopped ? 'The owner\'s alarm is ringing. Please wait here.' : 'The owner has been told.'}</div>` : ''}
+    </div>
+    ${t.status === 'assigned' ? `<button class="giant go" id="stStart">START THIS JOB</button>`
+      : `<button class="giant done" id="stDone">✓ I'VE FINISHED</button>`}
+    ${probReason ? `<p style="margin-top:18px;font-size:20px;font-weight:600">${esc(probReason)}: has your work stopped?</p><div class="stop2"><button class="yes" data-stop="1">YES, I CAN'T CONTINUE</button><button class="no" data-stop="0">No, I can keep going for now</button></div>`
+      : probOpen ? `<div class="probs">${['Material missing','Machine problem','Need instructions','Something else'].map(r => `<button data-prob="${r}">${r}</button>`).join('')}</div>`
+      : t.problem ? '' : `<button class="giant prob" id="stProb">Report a problem</button>`}`;
+  }
+  v.innerHTML = `<div class="st-head"><div><h1>${esc(w.name)}</h1><p class="lead" style="margin:0">${stageName(w.stage)}</p></div><div style="text-align:right"><button class="btn line" id="stOut" style="color:var(--paper);border-color:#555">Sign out</button><p class="idle" id="idleTxt"></p></div></div>
+    ${body}
+    ${t && next ? `<p class="upnext">Up next in ${stageName(w.stage)}: <b>${O(next.order).ref} · ${O(next.order).qty} × ${esc(O(next.order).item)}</b></p>` : ''}`;
+}
+
+function resetIdle(){
+  if (!me) return;
+  idleLeft = IDLE_SECONDS;
+  clearInterval(idleT);
+  idleT = setInterval(() => {
+    idleLeft--;
+    const el = $('#idleTxt'); if (el) el.textContent = idleLeft <= 15 ? `Signing out in ${idleLeft}s` : '';
+    if (idleLeft <= 0){ signOut(); }
+  }, 1000);
+}
+function signOut(){ me = null; pinFor = null; pin = ''; probOpen = false; probReason = null; clearInterval(idleT); stRender(); }
+
+$('#station').addEventListener('click', e => {
+  resetIdle();
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.who){ pinFor = b.dataset.who; pin = ''; stRender(); return; }
+  if (b.dataset.k){
+    const k = b.dataset.k;
+    if (k === 'back'){ pinFor = null; pin = ''; stRender(); return; }
+    if (k === 'del'){ pin = pin.slice(0, -1); stRender(); return; }
+    if (pin.length < 4) pin += k;
+    stRender();
+    if (pin.length === 4){
+      if (pin === W(pinFor).pin){ me = pinFor; pinFor = null; pin = ''; stRender(); resetIdle(); }
+      else { pin = ''; stRender(); $('#pinErr').textContent = 'Wrong PIN. Try again.'; }
+    }
+    return;
+  }
+  const w = me && W(me); const t = w && w.task && T(w.task);
+  if (b.id === 'stOut') return signOut();
+  if (b.id === 'stStart' && t){ startTask(t); toast('Started. Good work!'); stRender(); render(); return; }
+  if (b.id === 'stDone' && t){
+    if (b.dataset.sure !== '1'){ b.dataset.sure = '1'; b.textContent = 'TAP AGAIN TO CONFIRM'; b.style.background = 'var(--green)'; b.style.color = '#fff'; return; }
+    finishTask(t); probOpen = false;
+    const nt = w.task && T(w.task);
+    toast(nt ? `Done! Your next job is ${O(nt.order).ref}.` : 'Done! No job waiting. The owner has been told.');
+    stRender(); render(); return;
+  }
+  if (b.id === 'stProb'){ probOpen = true; stRender(); return; }
+  if (b.dataset.prob && t){ probReason = b.dataset.prob; stRender(); return; }
+  if (b.dataset.stop && t && probReason){
+    const stopped = b.dataset.stop === '1';
+    t.problem = { reason: probReason, at: Date.now(), stopped, ack:false };
+    log(`${w.name} ${stopped ? 'has STOPPED work' : 'reported a problem'} on ${O(t.order).ref}: ${probReason}`, 'alert', { order:t.order });
+    probOpen = false; probReason = null;
+    toast(stopped ? "The owner's alarm is ringing." : 'The owner has been told.');
+    if (!stopped) announce(MSG.problem(w, t, O(t.order)));
+    beep(); stRender(); render(); alarmRender(); return;
+  }
+});
+
+/* ---------- view switch ---------- */
+function mode(m){
+  $('#swOwner').classList.toggle('on', m === 'owner'); $('#swStation').classList.toggle('on', m === 'station');
+  $('#owner').classList.toggle('hidden', m !== 'owner'); $('#fab').classList.toggle('hidden', m !== 'owner');
+  $('#station').classList.toggle('hidden', m !== 'station');
+  if (m === 'owner') render(); else stRender();
+  alarmRender();
+  window.scrollTo(0,0);
+}
+$('#swOwner').onclick = () => mode('owner');
+$('#swStation').onclick = () => mode('station');
+mode(location.hash === '#station' ? 'station' : 'owner');
+setInterval(() => { if (!$('#owner').classList.contains('hidden') && !document.querySelector('.scrim')) render(); }, 30000);
+</script>
+<script>if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(()=>{});</script>
+</body>
+</html>
