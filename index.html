@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Kartech Workshop</title>
 <meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#111210">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -231,6 +236,7 @@ h2{font-size:22px;margin-bottom:4px}
     <button data-tab="today" class="on">Today <span class="badge" id="attnBadge"></span></button>
     <button data-tab="orders">Orders</button>
     <button data-tab="workshop">Workshop</button>
+    <button data-tab="workers">Workers</button>
     <span class="spacer"></span>
     <button class="btn newbtn" id="newOrderBtn">+ New order</button>
   </nav>
@@ -311,14 +317,14 @@ const queue = stage => S.tasks.filter(t => t.stage === stage && t.status === 'qu
 
 /* give free workers in a stage the next job */
 function release(stage, silent){
-  S.workers.filter(w => w.stage === stage && !w.task).forEach(w => {
+  S.workers.filter(w => w.active !== false && w.stage === stage && !w.task).forEach(w => {
     const next = queue(stage)[0];
     if (!next) return;
     next.status = 'assigned'; next.worker = w.id; next.assignedAt = Date.now();
     w.task = next.id;
     if (!silent) log(`${w.name} got the next job: ${O(next.order).ref} · ${stageName(stage)}`, 'info', { order: next.order });
   });
-  S.workers.filter(w => w.stage === stage && !w.task).forEach(w => {
+  S.workers.filter(w => w.active !== false && w.stage === stage && !w.task).forEach(w => {
     if (!silent && !w.waitLogged){ log(`${w.name} (${stageName(stage)}) has no work waiting`, 'warn'); w.waitLogged = true; }
   });
 }
@@ -371,9 +377,9 @@ function workerStatus(w){
   const all = STAGES.map(s => s.id);
   // [order, how many steps already finished]
   const plan = [
-    [{ customer:'Sample Café, Westlands',     item:'Bar stools',               qty:12,  deadline:day(-1), urgency:'high',   stages:all }, 2],
+    [{ customer:'Sample Café, Westlands',     item:'Bar stools',               qty:12,  deadline:day(-1), urgency:'high',   stages:all, notes:'Black frames, red seats. Customer collects.' }, 2],
     [{ customer:'Sample Hospital, Thika',     item:'4-seater waiting benches', qty:15,  deadline:day(1),  urgency:'urgent', stages:['metal','finish','load'] }, 1],
-    [{ customer:'Sample Hotel, Nakuru',       item:'Restaurant dining chairs', qty:40,  deadline:day(3),  urgency:'high',   stages:all }, 1],
+    [{ customer:'Sample Hotel, Nakuru',       item:'Restaurant dining chairs', qty:40,  deadline:day(3),  urgency:'high',   stages:all, notes:'Match the sample chair in the showroom.' }, 1],
     [{ customer:'Sample Restaurant, Kasarani',item:'High table sets',          qty:8,   deadline:day(2),  urgency:'normal', stages:all }, 3],
     [{ customer:'Sample Church, Embakasi',    item:'Church chairs',            qty:120, deadline:day(9),  urgency:'normal', stages:all }, 0],
     [{ customer:'Sample Bank, CBD',           item:'5-seater waiting benches', qty:10,  deadline:day(5),  urgency:'normal', stages:['metal','finish','load'] }, 0],
@@ -397,7 +403,7 @@ function workerStatus(w){
   log('Sample data loaded. These are demo orders, not real customers.', 'info');
   S.tasks.filter(t => t.status === 'working').slice(0, 3).forEach(t => log(`${W(t.worker).name} started ${O(t.order).ref} · ${stageName(t.stage)}`, 'info'));
   if (p) log(`${W(p.worker).name} reported a problem on ${O(p.order).ref}: Material missing`, 'alert', { order:p.order });
-  S.workers.filter(w => !w.task).forEach(w => { log(`${w.name} (${stageName(w.stage)}) has no work waiting`, 'warn'); w.waitLogged = true; });
+  S.workers.filter(w => w.active !== false && !w.task).forEach(w => { log(`${w.name} (${stageName(w.stage)}) has no work waiting`, 'warn'); w.waitLogged = true; });
 })();
 
 /* ---------- escalation: when work has STOPPED ----------
@@ -492,7 +498,7 @@ function attention(){
   const items = [];
   S.tasks.filter(t => t.problem).forEach(t => items.push({ lvl:'red', title:`${t.problem.stopped ? 'WORK STOPPED' : 'Problem'}: ${t.problem.reason}${t.problem.stopped && t.problem.ack ? ' (you\'re on it)' : ''}`, sub:`${W(t.worker).name} · ${O(t.order).ref} · ${stageName(t.stage)} · ${ago(t.problem.at)}`, act:`<button class="btn sm" data-solve="${t.id}">Mark solved</button>` }));
   S.orders.filter(o => !o.delivered && !orderProgress(o).finished && isLate(o.deadline)).forEach(o => items.push({ lvl:'red', title:`${o.ref} is past its deadline`, sub:`${o.qty} × ${o.item} · ${o.customer}`, act:`<button class="btn sm line" data-open="${o.id}">Open</button>` }));
-  S.workers.filter(w => !w.task).forEach(w => items.push({ lvl:'amber', title:`${w.name} is waiting for work`, sub:`${stageName(w.stage)} · nothing in the queue`, act:`<button class="btn sm line" data-tabgo="workshop">See workshop</button>` }));
+  S.workers.filter(w => w.active !== false && !w.task).forEach(w => items.push({ lvl:'amber', title:`${w.name} is waiting for work`, sub:`${stageName(w.stage)} · nothing in the queue`, act:`<button class="btn sm line" data-tabgo="workshop">See workshop</button>` }));
   S.orders.filter(o => !o.delivered && o.urgency === 'urgent' && !orderProgress(o).finished && !isLate(o.deadline)).forEach(o => items.push({ lvl:'amber', title:`Urgent: ${o.ref} due ${fmtDay(o.deadline).toLowerCase()}`, sub:`${o.qty} × ${o.item} · now at ${stageName(orderProgress(o).current.stage)}`, act:`<button class="btn sm line" data-open="${o.id}">Open</button>` }));
   S.orders.filter(o => !o.delivered && orderProgress(o).finished).forEach(o => items.push({ lvl:'green', title:`${o.ref} is loaded and ready`, sub:`${o.customer} · confirm delivery when it leaves`, act:`<button class="btn sm" data-deliver="${o.id}">Mark delivered</button>` }));
   return items;
@@ -501,7 +507,7 @@ function attention(){
 function viewToday(){
   const att = attention();
   const working = S.workers.filter(w => workerStatus(w)[0] === 'working').length;
-  const waiting = S.workers.filter(w => !w.task).length;
+  const waiting = S.workers.filter(w => w.active !== false && !w.task).length;
   const probs = S.tasks.filter(t => t.problem).length;
   const late = S.orders.filter(o => !o.delivered && !orderProgress(o).finished && isLate(o.deadline)).length;
   return `
@@ -511,7 +517,7 @@ function viewToday(){
       <button class="stat ${probs ? 'alert' : ''}" data-tabgo="workshop"><b>${probs}</b><span>Problems reported</span></button>
       <button class="stat ${waiting ? 'warn' : ''}" data-tabgo="workshop"><b>${waiting}</b><span>Waiting for work</span></button>
       <button class="stat ${late ? 'alert' : ''}" data-tabgo="orders"><b>${late}</b><span>Orders past deadline</span></button>
-      <button class="stat" data-tabgo="workshop"><b>${working}/${S.workers.length}</b><span>Workers busy</span></button>
+      <button class="stat" data-tabgo="workshop"><b>${working}/${S.workers.filter(w => w.active !== false).length}</b><span>Workers busy</span></button>
     </div>
     <p class="section-title">Needs your attention</p>
     <div class="list">${att.length ? att.map(a => `
@@ -552,7 +558,7 @@ function viewWorkshop(){
     <h2>Workshop</h2>
     <p class="sub">Each step has its own line of jobs. When someone finishes, they get the top job automatically. Use ▲▼ to change the order.</p>
     <div class="board">${STAGES.map(s => {
-      const ws = S.workers.filter(w => w.stage === s.id);
+      const ws = S.workers.filter(w => w.active !== false && w.stage === s.id);
       const q = queue(s.id);
       return `<div class="col">
         <h3>${s.name}</h3><p class="s">${ws.length} worker${ws.length === 1 ? '' : 's'} · ${q.length} waiting</p>
@@ -569,15 +575,63 @@ function viewWorkshop(){
       </div>`; }).join('')}</div>`;
 }
 
+function viewWorkers(){
+  const row = w => { const [k, l] = w.active === false ? ['normal','Switched off'] : workerStatus(w); const t = w.task && T(w.task);
+    return `<div class="item"><div class="grow"><div class="t">${esc(w.name)} <span class="pill p-${k}">${l}</span></div>
+      <div class="s">${stageName(w.stage)} · ID ${w.id.toUpperCase()} · PIN ••••${t ? ` · on ${O(t.order).ref}` : ''}</div></div>
+      <button class="btn sm line" data-editw="${w.id}">Edit</button></div>`; };
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:end;gap:12px;flex-wrap:wrap"><div><h2>Workers</h2>
+    <p class="sub" style="margin-bottom:0">Each worker signs in on the workshop PC with their own PIN.</p></div>
+    <button class="btn" data-addw>+ Add worker</button></div>
+    ${STAGES.map(s => { const ws = S.workers.filter(w => w.stage === s.id); return `<p class="section-title">${s.name}</p>
+      <div class="list">${ws.length ? ws.map(row).join('') : '<p class="empty">No one in this step yet.</p>'}</div>`; }).join('')}`;
+}
+
+function workerModal(id){
+  const w = id ? W(id) : null;
+  const s = openModal(`
+    <h2>${w ? 'Edit ' + esc(w.name) : 'Add a worker'}</h2>
+    <label class="field"><span>Name</span><input id="wName" value="${w ? esc(w.name) : ''}" placeholder="e.g. Odhiambo" autocomplete="off"></label>
+    <label class="field"><span>Works in</span><select id="wStage" ${w && w.task ? 'disabled' : ''}>${STAGES.map(st => `<option value="${st.id}" ${w && w.stage === st.id ? 'selected' : ''}>${st.name}</option>`).join('')}</select>
+      ${w && w.task ? '<small style="color:var(--muted)">Can change step once their current job is finished.</small>' : ''}</label>
+    <label class="field"><span>${w ? 'New PIN (leave empty to keep the old one)' : '4-digit PIN'}</span><input id="wPin" inputmode="numeric" maxlength="4" placeholder="e.g. 4821" autocomplete="off"></label>
+    <p id="wErr" style="color:var(--red);min-height:20px;font-size:13px"></p>
+    <div class="actions" style="justify-content:space-between">
+      ${w ? `<button class="btn ${w.active === false ? '' : 'red'}" id="wToggle">${w.active === false ? 'Switch back on' : 'Switch off'}</button>` : '<span></span>'}
+      <span style="display:flex;gap:8px"><button class="btn line" data-x>Cancel</button><button class="btn" id="wSave">Save</button></span>
+    </div>`);
+  s.querySelector('#wSave').onclick = () => {
+    const name = s.querySelector('#wName').value.trim(), stage = s.querySelector('#wStage').value, pinv = s.querySelector('#wPin').value.trim();
+    if (!name) return s.querySelector('#wErr').textContent = 'Add a name.';
+    if ((!w || pinv) && !/^\d{4}$/.test(pinv)) return s.querySelector('#wErr').textContent = 'The PIN must be exactly 4 numbers.';
+    if (w){ const moved = !w.task && w.stage !== stage; w.name = name; if (!w.task) w.stage = stage; if (pinv) w.pin = pinv;
+      log(`Worker updated: ${name}${moved ? ' moved to ' + stageName(stage) : ''}${pinv ? ' (new PIN)' : ''}`, 'info'); if (moved) release(stage); }
+    else { const nw = { id:'w' + (++seq), name, stage, pin: pinv, task:null, active:true }; S.workers.push(nw); log(`New worker added: ${name}, ${stageName(stage)}`, 'good'); release(stage); }
+    closeModal(); render(); toast('Saved');
+  };
+  const tg = s.querySelector('#wToggle');
+  if (tg) tg.onclick = () => {
+    if (w.active === false){ w.active = true; log(`${w.name} switched back on`, 'info'); release(w.stage); }
+    else {
+      if (w.task){ const t = T(w.task); t.worker = null; t.problem = null; t.status = 'queued'; const q = queue(t.stage).filter(x => x !== t); q.unshift(t); q.forEach((x,n)=>x.rank=n); w.task = null; }
+      w.active = false; log(`${w.name} switched off. Can no longer sign in.`, 'warn'); release(w.stage);
+    }
+    closeModal(); render(); toast('Saved');
+  };
+}
+
 function render(){
   document.querySelectorAll('.tabs [data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   const n = attention().filter(a => a.lvl === 'red').length;
   $('#attnBadge').textContent = n || ''; $('#attnBadge').style.display = n ? '' : 'none';
-  $('#view').innerHTML = tab === 'today' ? viewToday() : tab === 'orders' ? viewOrders() : viewWorkshop();
+  $('#view').innerHTML = tab === 'today' ? viewToday() : tab === 'orders' ? viewOrders() : tab === 'workers' ? viewWorkers() : viewWorkshop();
 }
 
 /* owner clicks */
 document.addEventListener('click', e => {
+  if (e.target.closest('[data-addw]')) return workerModal();
+  const ew = e.target.closest('[data-editw]'); if (ew) return workerModal(ew.dataset.editw);
   const b = e.target.closest('[data-tabgo],[data-open],[data-solve],[data-deliver],[data-up],[data-down]');
   if (!b) return;
   if (b.dataset.tabgo){ tab = b.dataset.tabgo; render(); window.scrollTo(0,0); }
@@ -606,6 +660,7 @@ function newOrderModal(){
       <label class="field"><span>How many</span><input id="fQty" type="number" min="1" value="10"></label>
     </div>
     <label class="field"><span>Deadline</span><input id="fDate" type="date" value="${iso}"></label>
+    <label class="field"><span>Note for the workshop (optional)</span><textarea id="fNote" rows="2" placeholder="e.g. Black frames, red seats. Customer collects."></textarea></label>
     <div class="field"><span>How urgent</span><div class="seg-pick" id="fUrg">
       <button type="button" data-u="normal" class="on">Normal</button><button type="button" data-u="high">High</button><button type="button" data-u="urgent">Urgent</button></div></div>
     <div class="field"><span>Steps it needs</span><div class="checks">${STAGES.map(st => `<label><input type="checkbox" value="${st.id}" checked> ${st.name}</label>`).join('')}</div></div>
@@ -620,7 +675,7 @@ function newOrderModal(){
     if (!customer || !item || qty < 1) return s.querySelector('#fErr').textContent = 'Fill in the customer, what, and how many.';
     if (!stages.length) return s.querySelector('#fErr').textContent = 'Pick at least one step.';
     const dl = new Date(s.querySelector('#fDate').value + 'T17:00');
-    const o = createOrder({ customer, item, qty, deadline: isNaN(dl) ? day(7) : dl, urgency: urg, stages });
+    const o = createOrder({ customer, item, qty, deadline: isNaN(dl) ? day(7) : dl, urgency: urg, stages, notes: s.querySelector('#fNote').value.trim() });
     closeModal(); tab = 'orders'; render();
     const t = S.tasks.find(x => x.order === o.id && x.worker);
     toast(t ? `${o.ref} added. ${W(t.worker).name} has it now.` : `${o.ref} added. It's #${queue(stages[0]).findIndex(x => x.order === o.id) + 1} in ${stageName(stages[0])}.`);
@@ -635,6 +690,7 @@ function orderModal(id){
   openModal(`
     <div style="display:flex;justify-content:space-between;align-items:start;gap:10px"><div><h2 style="margin:0">${o.ref}</h2><p class="sub" style="margin:2px 0 0">${esc(o.customer)}</p></div><span class="pill p-${o.urgency}">${URG_NAME[o.urgency]}</span></div>
     <p style="margin:14px 0 4px;font-size:17px"><b>${o.qty} × ${esc(o.item)}</b></p>
+    ${o.notes ? `<p style="margin:6px 0;padding:10px 12px;background:#fff;border:1px solid var(--line);border-radius:6px">📝 ${esc(o.notes)}</p>` : ''}
     <p class="${!p.finished && isLate(o.deadline) ? 'due late' : ''}" style="text-align:left">Deadline: ${fmtDay(o.deadline)}</p>
     <div style="margin:14px 0">${pipe(o)}</div>
     <div class="steps">${ts.map(t => { const [k, l] = lbl(t); return `<div class="step"><div style="flex:1"><b>${stageName(t.stage)}</b><div style="color:var(--muted);font-size:13px">${t.worker ? esc(W(t.worker).name) : 'Not given to anyone yet'}${t.problem ? ` · ⚠ ${esc(t.problem.reason)}` : ''}</div></div><span class="pill p-${k}">${l}</span>${t.problem ? `<button class="btn sm" data-solve="${t.id}">Solved</button>` : ''}</div>`; }).join('')}</div>
@@ -663,7 +719,7 @@ function stRender(){
   const v = $('#stView');
   if (!pinFor && !me){
     v.innerHTML = `<h1>Who's working?</h1><p class="lead">Tap your name.</p>
-      ${STAGES.map(s => `<div class="st-group"><h4>${s.name.toUpperCase()}</h4><div class="names">${S.workers.filter(w => w.stage === s.id).map(w => `<button class="name" data-who="${w.id}">${esc(w.name)}</button>`).join('')}</div></div>`).join('')}
+      ${STAGES.map(s => `<div class="st-group"><h4>${s.name.toUpperCase()}</h4><div class="names">${S.workers.filter(w => w.active !== false && w.stage === s.id).map(w => `<button class="name" data-who="${w.id}">${esc(w.name)}</button>`).join('')}</div></div>`).join('')}
       <p class="hint">Demo: every PIN is 1234</p>`;
     return;
   }
@@ -686,6 +742,7 @@ function stRender(){
     body = `<div class="task">
       <p class="k">${stageName(t.stage).toUpperCase()} · ${o.ref}</p>
       <p class="big">${o.qty} × ${esc(o.item)}</p>
+      ${o.notes ? `<div class="note" style="font-size:19px">📝 ${esc(o.notes)}</div>` : ''}
       <div class="meta"><span><span class="pill p-${o.urgency}">${URG_NAME[o.urgency]}</span></span><span>Due <b>${fmtDay(o.deadline)}</b></span><span>Then goes to: <b>${after ? stageName(after) : 'Delivery'}</b></span></div>
       ${t.problem ? `<div class="note" style="border-color:var(--red);color:var(--red)">⚠ You reported: <b>${esc(t.problem.reason)}</b>${t.problem.stopped ? ' · work stopped' : ''}.<br>${t.problem.ack ? '<b style="color:var(--green)">✓ The owner has seen this and is on it.</b>' : t.problem.stopped ? 'The owner\'s alarm is ringing. Please wait here.' : 'The owner has been told.'}</div>` : ''}
     </div>
@@ -764,5 +821,6 @@ $('#swStation').onclick = () => mode('station');
 mode(location.hash === '#station' ? 'station' : 'owner');
 setInterval(() => { if (!$('#owner').classList.contains('hidden') && !document.querySelector('.scrim')) render(); }, 30000);
 </script>
+<script>if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(()=>{});</script>
 </body>
 </html>
