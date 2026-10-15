@@ -1,15 +1,17 @@
 {
-  "name": "Kartech Workshop",
+  "name": "Kartech",
   "short_name": "Kartech",
-  "description": "Kartech Engineering workshop: orders, jobs and workers.",
+  "description": "Kartech Engineering: shop and track orders, run the workshop, manage the business.",
+  "id": "/kartech-system/",
   "start_url": "./",
-  "scope": "./",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#111210",
-  "theme_color": "#111210",
+  "orientation": "any",
+  "background_color": "#1F3A2A",
+  "theme_color": "#1F3A2A",
   "icons": [
     { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    { "src": "icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }

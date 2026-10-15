@@ -22,6 +22,7 @@
   }
   function workerStatus(w){
     if (!w.active) return ['normal', 'Switched off'];
+    if (w.away) return ['normal', 'Away today'];
     if (!w.task) return ['waiting', 'Waiting for work'];
     const t = T(w.task);
     if (!t) return ['notstarted', 'Not started'];
@@ -64,7 +65,7 @@
     try {
       const since = new Date(Date.now() - 30 * 864e5).toISOString();
       const [w, o, l, wb, mt, mv, sd, tl, tc, tm, ln, hc] = await Promise.all([
-        db.from('ws_workers').select('id,name,stage,active,task_id,locked_until,created_at').order('name'),
+        db.from('ws_workers').select('id,name,stage,active,task_id,locked_until,created_at,away_on,covers').order('name'),
         db.from('ws_orders').select('*').or('delivered_at.is.null,delivered_at.gt.' + since).order('created_at', { ascending:false }).limit(400),
         db.from('ws_log').select('*').order('id', { ascending:false }).limit(60),
         db.from('orders').select('id,order_no,created_at,status,customer_name,phone,fulfilment,delivery_location,notes,items').in('status', ['received','confirmed','workshop']).order('created_at', { ascending:false }).limit(100),
@@ -81,7 +82,8 @@
       const ids = o.data.map(x => x.id);
       const t = ids.length ? await db.from('ws_tasks').select('*').in('order_id', ids) : { data: [] };
       if (t.error) throw t.error;
-      S.workers = w.data.map(x => ({ id:x.id, name:x.name, stage:x.stage, active:x.active, task:x.task_id, locked: x.locked_until && new Date(x.locked_until) > new Date() }));
+      const today = new Date().toLocaleDateString('en-CA', { timeZone:'Africa/Nairobi' });
+      S.workers = w.data.map(x => ({ id:x.id, name:x.name, stage:x.stage, active:x.active, task:x.task_id, covers:x.covers || [], away: !!x.away_on && String(x.away_on).slice(0, 10) === today, locked: x.locked_until && new Date(x.locked_until) > new Date() }));
       S.web = wb.error ? [] : wb.data;
       S.mats = mt.error ? [] : mt.data.map(x => ({ id:x.id, name:x.name, unit:x.unit, store:+x.in_store, low:+x.low_at, active:x.active, stages:x.stages || [] }));
       S.moves = mv.error ? [] : mv.data.map(x => ({ id:x.id, at:new Date(x.at).getTime(), mat:x.material_id, kind:x.kind, qty:+x.qty, order:x.order_id, worker:x.worker_id, note:x.note }));
@@ -134,7 +136,10 @@
     if (S.hasCode === false && (S.tools.some(t => t.active) || S.mats.length)) items.push({ lvl:'amber', title:'Set the foreman code', sub:'The foreman needs it to tick tools and materials on the workshop screen', act:`<button class="btn sm line" data-fmcode>Set code</button>` });
     if (S.tools.some(t => t.active) && checkDue() && !S.toolChecks.find(c => c.day === todayStr()))
       items.push({ lvl:'amber', title:'Tool check not done yet tonight', sub:`The foreman should check the tools at ${KT_CONFIG.toolCheckAt || '18:30'} on the workshop screen`, act:`<button class="btn sm line" data-tabgo="stock">See tools</button>` });
-    const idle = S.workers.filter(w => w.active && !w.task);
+    STAGES.forEach(st => { const q = queue(st.id); if (!q.length) return;
+      const can = S.workers.filter(w => w.active && !w.away && (w.stage === st.id || w.covers.includes(st.id)));
+      if (!can.length) items.push({ lvl:'red', title:`Nobody in ${st.name} today`, sub:`${q.length} job${q.length > 1 ? 's' : ''} waiting. Pick someone to step up.`, act:`<button class="btn sm" data-give="${q[0].id}">Give to…</button>` }); });
+    const idle = S.workers.filter(w => w.active && !w.away && !w.task);
     if (idle.length) items.push({ lvl:'amber', title: idle.length === 1 ? `${idle[0].name} is waiting for work` : `${idle.slice(0, -1).map(w => w.name).join(', ')} and ${idle[idle.length - 1].name} are waiting for work`,
       sub: idle.length === 1 ? `${stageName(idle[0].stage)} · nothing in the line` : 'Nothing in their lines. Add an order or send a website order.', act:`<button class="btn sm line" data-tabgo="workshop">See workshop</button>` });
     S.orders.filter(o => !o.delivered && o.urgency === 'urgent' && !orderProgress(o).finished && !isLate(o.deadline)).forEach(o => { const c = orderProgress(o).current;
@@ -253,6 +258,9 @@
       <button class="btn line" id="vTest">Test voice</button>
       <p class="section-title">📱 On your phone</p>
       <p class="sub" style="margin-bottom:0">You stay signed in on this phone. To get an app icon: open the browser menu (⋮) and tap <b>Add to Home screen</b>.</p>
+      <p class="section-title">⇄ Switch</p>
+      <p class="sub" style="margin-bottom:8px">Use this phone as the workshop screen or the customer shop instead.</p>
+      <a class="btn line" href="index.html?choose" style="text-decoration:none">Switch to another side</a>
       <div class="actions" style="justify-content:space-between;margin-top:22px"><button class="btn line" id="outBtn2" style="color:var(--red)">Sign out of this phone</button><button class="btn" data-x>Done</button></div>
     </div>`);
   }
@@ -324,12 +332,15 @@
   function viewWorkers(){
     const row = w => { const [k, l] = workerStatus(w); const t = w.task && T(w.task); const o = t && O(t.order);
       return `<div class="item"><div class="grow"><div class="t">${esc(w.name)} <span class="pill p-${k}">${l}</span></div>
-        <div class="s">${stageName(w.stage)}${o ? ` · on ${o.ref}` : ''}</div></div>
+        <div class="s">${stageName(w.stage)}${w.covers.length ? ` · also ${w.covers.map(c => stageName(c).toLowerCase()).join(', ')}` : ''}${o ? ` · on ${o.ref}` : ''}</div></div>
+        ${w.active ? `<button class="btn sm ${w.away ? '' : 'line'} away-btn" data-away="${w.id}" data-v="${w.away ? 0 : 1}">${w.away ? 'Back today' : 'Away today'}</button>` : ''}
         <button class="btn sm line" data-editw="${w.id}">Edit</button></div>`; };
+    const away = S.workers.filter(w => w.active && w.away);
     return `
       <div style="display:flex;justify-content:space-between;align-items:end;gap:12px;flex-wrap:wrap"><div><h2>Workers</h2>
-      <p class="sub" style="margin-bottom:0">On the workshop screen (<a href="station.html">station.html</a>) each worker taps their name to see their job.</p></div>
+      <p class="sub" style="margin-bottom:0">On the workshop screen (Kartech app → Workshop) each worker taps their name to see their job.</p></div>
       <button class="btn" data-addw>+ Add worker</button></div>
+      <div class="fm-card today-card"><span class="fm-ic">📋</span><div class="grow"><b>Today: ${S.workers.filter(w => w.active && !w.away).length} here${away.length ? `, ${away.length} away (${away.map(w => esc(w.name)).join(', ')})` : ''}</b><p>Every morning, tap <b>Away today</b> for anyone who didn't come. Their job goes to someone else and they get no new work today. It resets by itself tomorrow.</p></div></div>
       <div class="fm-card anim"><span class="fm-ic">🔑</span><div class="grow"><b>Foreman code</b><p>${S.hasCode ? 'Set. The foreman uses it on the workshop screen to tick tools and materials.' : 'Not set yet. The foreman needs it to open his page on the workshop screen.'}</p></div><button class="btn ${S.hasCode ? 'line' : ''}" data-fmcode>${S.hasCode ? 'Change code' : 'Set code'}</button></div>
       <div class="fm-card"><span class="fm-ic">🪜</span><div class="grow"><b>Workshop steps</b><p>${STAGES.map(x => esc(x.name)).join(' → ')}</p></div><button class="btn line" data-steps>Edit steps</button></div>
       ${STAGES.map(s => { const ws = S.workers.filter(w => w.stage === s.id); return `<p class="section-title">${s.name}${s.grp !== s.name ? ` <span class="grp-tag">${esc(s.grp)}</span>` : ''}</p>
@@ -372,6 +383,9 @@
     if (e.target.closest('[data-addtool]')) return toolModal();
     if (e.target.closest('[data-fmcode]')) return fmCodeModal();
     if (e.target.closest('[data-steps]')) return stepsModal();
+    const gv = e.target.closest('[data-give]'); if (gv) return giveModal(gv.dataset.give);
+    const aw = e.target.closest('[data-away]'); if (aw){ aw.disabled = true; const w = W(aw.dataset.away);
+      return act('ws_set_away', { p_worker: aw.dataset.away, p_away: aw.dataset.v === '1' }, aw.dataset.v === '1' ? `${w ? w.name : 'Worker'} is away today` : `${w ? w.name : 'Worker'} is back`); }
     const et = e.target.closest('[data-edittool]'); if (et) return toolModal(et.dataset.edittool);
     const tf = e.target.closest('[data-toolfound]'); if (tf){ tf.disabled = true; return act('ws_tool_found', { p_tool: tf.dataset.toolfound }, 'Marked as back'); }
     const em = e.target.closest('[data-editmat]'); if (em) return materialModal(em.dataset.editmat);
@@ -475,7 +489,7 @@
       ${(() => { const use = orderUse(o); return use.length ? `<p class="section-title">Materials</p><div class="steps">${use.map(r => { const m = M(r.mat);
         return `<div class="step"><div style="flex:1"><b>${esc(m.name)}</b><div style="color:var(--muted);font-size:13px">Given ${n2(r.given)} ${esc(m.unit)}${r.normal != null ? ` · normal ${n2(r.normal)} ${esc(m.unit)}` : ''}</div></div>${r.over ? '<span class="pill p-attention">More than normal</span>' : r.normal != null ? '<span class="pill p-working">OK</span>' : ''}</div>`; }).join('')}</div>` : ''; })()}
       <p class="section-title">Steps</p>
-      <div class="steps">${ts.map(t => { const [k, l] = lbl(t); const w = t.worker && W(t.worker); return `<div class="step"><div style="flex:1"><b>${stageName(t.stage)}</b><div style="color:var(--muted);font-size:13px">${w ? esc(w.name) : 'Not given to anyone yet'}${t.problem ? ` · ⚠ ${esc(t.problem.reason)}` : ''}</div></div><span class="pill p-${k}">${l}</span>${t.problem ? `<button class="btn sm" data-solve="${t.id}">Solved</button>` : ''}</div>`; }).join('')}</div>
+      <div class="steps">${ts.map(t => { const [k, l] = lbl(t); const w = t.worker && W(t.worker); return `<div class="step"><div style="flex:1"><b>${stageName(t.stage)}</b><div style="color:var(--muted);font-size:13px">${w ? esc(w.name) : 'Not given to anyone yet'}${t.problem ? ` · ⚠ ${esc(t.problem.reason)}` : ''}</div></div><span class="pill p-${k}">${l}</span>${t.problem ? `<button class="btn sm" data-solve="${t.id}">Solved</button>` : ''}${['queued','assigned','working'].includes(t.status) && !o.delivered ? `<button class="btn sm line" data-give="${t.id}">${t.worker ? 'Change' : 'Give to…'}</button>` : ''}</div>`; }).join('')}</div>
       ${!o.delivered && o.urgency !== 'urgent' && !p.finished ? `<p style="margin-top:14px;font-size:13px;color:var(--muted)">Customer pushing? Make it urgent and it jumps to the front of every line. No one's current job gets interrupted.</p>` : ''}
       <div class="actions">
         ${!o.delivered && o.urgency !== 'urgent' && !p.finished ? `<button class="btn red" id="mkUrgent">Make urgent</button>` : ''}
@@ -531,6 +545,26 @@
         : '<p class="empty">No tools yet. Add each one with its painted number, e.g. "Grinder 1", "Grinder 2", "Welding machine".</p>'}
       ${Object.keys(per).length ? `<p class="tool-hist"><b>Missing in the last 30 days:</b> ${Object.entries(per).sort((a,b) => b[1] - a[1]).map(([wid, c]) => `${esc((W(wid) || {}).name || 'Unknown')} ${c}×`).join(' · ')}</p>` : ''}
     </div>`;
+  }
+  function giveModal(taskId){
+    const t = T(taskId); if (!t) return; const o = O(t.order);
+    const here = S.workers.filter(w => w.active && !w.away);
+    const fits = here.filter(w => w.stage === t.stage || w.covers.includes(t.stage));
+    const others = here.filter(w => !fits.includes(w));
+    const btn = w => { const wt = w.task && T(w.task), wo = wt && O(wt.order); const mine = t.worker === w.id;
+      return `<button class="give-w ${w.task && !mine ? 'busy' : ''}" data-gw="${w.id}" ${w.task && !mine ? 'disabled' : ''}><span class="av">${esc(w.name.charAt(0))}</span><span><b>${esc(w.name)}</b><small>${mine ? 'Has it now' : wt ? `Busy on ${wo ? wo.ref : 'a job'} (${stageName(wt.stage)})` : 'Free · ' + esc(stageName(w.stage))}</small></span></button>`; };
+    const s = openModal(`<h2>Who should do this?</h2>
+      <p class="sub"><b>${o ? o.ref : ''} · ${stageName(t.stage)}</b>${o ? ` · ${o.qty} × ${esc(o.item)}` : ''}</p>
+      <p class="section-title" style="margin-top:4px">${esc(stageName(t.stage))} workers</p>
+      <div class="give-list">${fits.length ? fits.map(btn).join('') : '<p class="empty" style="padding:8px">Nobody in this step is here today.</p>'}</div>
+      ${others.length ? `<p class="section-title">Someone else stepping up</p><div class="give-list">${others.map(btn).join('')}</div>` : ''}
+      <p class="sub" style="font-size:13px;margin-top:10px">Busy people can't be picked until they finish. If someone didn't come, mark them <b>Away today</b> on the Workers page and their job comes back here.</p>
+      <p id="gErr" class="ferr"></p>
+      <div class="actions"><button class="btn line" data-x>Cancel</button></div>`);
+    s.addEventListener('click', async e => { const b = e.target.closest('[data-gw]'); if (!b || b.disabled) return; b.disabled = true;
+      const { error } = await db.rpc('ws_give_task', { p_task: taskId, p_worker: b.dataset.gw });
+      if (error){ b.disabled = false; s.querySelector('#gErr').textContent = errMsg(error); return; }
+      closeModal(); toast(`Given to ${W(b.dataset.gw).name}`); await load(); });
   }
   function stepsModal(){
     const s = openModal(`<h2>Workshop steps</h2>
@@ -718,6 +752,7 @@
       <label class="field"><span>Name</span><input id="wName" value="${w ? esc(w.name) : ''}" placeholder="e.g. Odhiambo" autocomplete="off"></label>
       <label class="field"><span>Works in</span><select id="wStage" ${w && w.task ? 'disabled' : ''}>${stepGroups().map(g => `<optgroup label="${esc(g.grp)}">${g.steps.map(st => `<option value="${st.id}" ${w && w.stage === st.id ? 'selected' : ''}>${esc(st.name)}</option>`).join('')}</optgroup>`).join('')}</select>
         ${w && w.task ? '<small style="color:var(--muted)">Can change step once their current job is finished.</small>' : ''}</label>
+      <div class="field"><span>Can also do (optional): when their own step has no work, they help here</span>${stepChecks(w ? w.covers : [], 'wCover')}</div>
       <p style="font-size:13px;color:var(--muted)">They go in on the workshop screen by tapping their name.</p>
       <p id="wErr" style="color:var(--red);min-height:20px;font-size:13px"></p>
       <div class="actions" style="justify-content:space-between">
@@ -728,7 +763,7 @@
       const name = s.querySelector('#wName').value.trim(), stage = s.querySelector('#wStage').value;
       if (!name) return s.querySelector('#wErr').textContent = 'Add a name.';
       const btn = s.querySelector('#wSave'); btn.disabled = true;
-      const { error } = await db.rpc('ws_save_worker', { p: { id: w ? w.id : null, name, stage: w && w.task ? w.stage : stage } });
+      const { error } = await db.rpc('ws_save_worker', { p: { id: w ? w.id : null, name, stage: w && w.task ? w.stage : stage, covers: [...s.querySelectorAll('.wCover:checked')].map(x => x.value) } });
       if (error){ btn.disabled = false; s.querySelector('#wErr').textContent = errMsg(error); return; }
       closeModal(); toast('Saved'); await load();
     };

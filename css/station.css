@@ -187,3 +187,18 @@ body.sw{background:var(--paper);color:var(--ink)}
 .qty-acts .btn{padding:14px 8px;font-size:15px}
 .qty-acts .btn.line{color:var(--ink)}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+
+.mat-tile{display:flex;flex-direction:column;border-radius:14px}
+.mat-tile .tc{border-radius:14px}
+.mat-tile.has .tc{border-color:#CFE0D4;border-bottom-left-radius:0;border-bottom-right-radius:0}
+.mat-tile .tc small em{display:block;font-style:normal;color:#8A4B0C;font-weight:700;font-size:14px}
+.again{background:var(--leaf);color:#fff;font-weight:700;font-size:16px;padding:12px;border-radius:0 0 14px 14px;transition:background .2s}
+.again:hover{background:var(--forest)}
+.again:active{transform:scale(.98)}
+.mat-tile.bump{animation:bump .6s var(--ease)}
+@keyframes bump{30%{transform:scale(1.04)}100%{transform:none}}
+
+.sw-foot{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.sw-switch{color:#BFD0C4;font-size:13px;text-decoration:none;border:1px solid rgba(255,255,255,.2);border-radius:20px;padding:5px 12px}
+.sw-switch:hover{background:rgba(255,255,255,.08)}
+@media (max-width:860px){ .sw-foot{gap:8px} .sw-switch{padding:4px 9px;font-size:12px} }
