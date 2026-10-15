@@ -5,15 +5,32 @@ const KT_CONFIG = {
   stationIdleSeconds: 60,     // workshop PC signs the worker out after this long with no taps
   toolCheckAt: '18:30'        // closing time: the foreman's evening tool check
 };
+// Workshop steps. Loaded from the database (the owner can change them); these are the defaults.
 const STAGES = [
-  { id:'metal',  name:'Metalwork',             short:'Metal' },
-  { id:'foam',   name:'Foaming & fabrication', short:'Foam & fab' },
-  { id:'finish', name:'Finishing',             short:'Finishing' },
-  { id:'load',   name:'Loading',               short:'Loading' }
+  { id:'get',    name:'Getting metals',        short:'Get metals', grp:'Metalwork' },
+  { id:'cut',    name:'Cutting',               short:'Cutting',    grp:'Metalwork' },
+  { id:'fold',   name:'Folding',               short:'Folding',    grp:'Metalwork' },
+  { id:'weld',   name:'Welding',               short:'Welding',    grp:'Metalwork' },
+  { id:'grind',  name:'Grinding',              short:'Grinding',   grp:'Metalwork' },
+  { id:'paint',  name:'Painting',              short:'Painting',   grp:'Metalwork' },
+  { id:'foam',   name:'Foaming & fabrication', short:'Foam & fab', grp:'Foaming & fabrication' },
+  { id:'finish', name:'Finishing',             short:'Finishing',  grp:'Finishing' },
+  { id:'load',   name:'Loading',               short:'Loading',    grp:'Loading' }
 ];
+const ALL_STEPS = STAGES.slice();
+async function loadSteps(){
+  if (!db) return;
+  const { data, error } = await db.from('ws_steps').select('*').order('sort');
+  if (error || !data || !data.length) return;
+  const all = data.map(x => ({ id:x.id, name:x.name, short:x.name.length > 12 ? x.name.split(/[ &]/)[0] : x.name, grp:x.grp, active:x.active, sort:x.sort }));
+  ALL_STEPS.splice(0, ALL_STEPS.length, ...all);
+  STAGES.splice(0, STAGES.length, ...all.filter(x => x.active));
+}
+// steps grouped for forms: [{ grp, steps:[…] }]
+const stepGroups = (list = STAGES) => list.reduce((a, s) => { const g = a.find(x => x.grp === s.grp); g ? g.steps.push(s) : a.push({ grp:s.grp, steps:[s] }); return a; }, []);
 const URG = { urgent:0, high:1, normal:2 };
 const URG_NAME = { urgent:'Urgent', high:'High', normal:'Normal' };
-const stageName = id => (STAGES.find(s => s.id === id) || { name:id }).name;
+const stageName = id => (ALL_STEPS.find(s => s.id === id) || { metal:{ name:'Metalwork' } }[id] || { name:id }).name;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmtDay = d => {

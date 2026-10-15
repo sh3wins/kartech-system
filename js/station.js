@@ -21,6 +21,7 @@
       if (!owner){ await db.auth.signOut(); $('#setView').classList.remove('hidden'); $('#sErr').textContent = "That account isn't the workshop account."; return; }
     }
     $('#setView').classList.add('hidden'); $('#live').classList.remove('hidden');
+    await loadSteps();
     await loadNames();
   }
   $('#setForm').addEventListener('submit', async e => {
@@ -92,7 +93,9 @@
         <div class="st-group anim" style="--i:1"><h4>Tools · tap when he takes it, tap again when it comes back</h4><div class="tc-grid">${tl.map(t => {
           const mine = t.with === w.id, other = t.with && !mine;
           return `<button class="tc ${mine ? 'out' : other ? 'other' : ''}" data-ft="${t.id}"><span class="tc-ic">${mine ? '↗' : other ? '•' : '✓'}</span><span><b>${esc(t.name)}</b><small>${mine ? 'With ' + esc(w.name) + ' since ' + fmTime(t.since) : other ? 'With ' + esc(t.with_name || 'someone') : 'In the store'}</small></span></button>`; }).join('') || '<p class="muted">No tools added yet. The owner adds them in the app.</p>'}</div></div>
-        <div class="st-group anim" style="--i:2"><h4>Materials for ${stageName(w.stage)} · tap what he takes</h4><div class="tc-grid">${mats.map(m => `<button class="tc mat" data-fmat="${m.id}"><span class="tc-ic">📦</span><span><b>${esc(m.name)}</b><small>${+(+m.in_store).toFixed(2)} ${esc(m.unit)} in store</small></span></button>`).join('') || '<p class="muted">No materials for this step yet.</p>'}</div></div>
+        <div class="st-group anim" style="--i:2"><h4>Materials for ${stageName(w.stage)} · tap what he takes</h4><div class="tc-grid">${mats.map(m => { const td = w.today.find(x => x.material_id === m.id); const nf = x => +(+x).toFixed(2);
+          return `<div class="mat-tile ${td ? 'has' : ''}"><button class="tc mat" data-fmat="${m.id}"><span class="tc-ic">📦</span><span><b>${esc(m.name)}</b><small>${td ? `<em>${nf(td.qty)} ${esc(m.unit)} taken today${td.times > 1 ? ' (' + td.times + ' times)' : ''}</em>` : ''}${nf(m.in_store)} ${esc(m.unit)} in store</small></span></button>
+            ${td && td.last ? `<button class="again" data-again="${m.id}" data-q="${nf(td.last)}">+ ${nf(td.last)} again</button>` : ''}</div>`; }).join('') || '<p class="muted">No materials for this step yet.</p>'}</div></div>
         ${w.today.length ? `<div class="sw-card today anim" style="--i:3"><p class="k">Taken today by ${esc(w.name)}</p>${w.today.map(x => `<p>${+(+x.qty).toFixed(2)} ${esc(x.unit)} <b>${esc(x.material)}</b></p>`).join('')}</div>` : ''}
         ${fm.pick ? qtyPanel(w) : ''}`;
       return;
@@ -148,6 +151,15 @@
       await fmLoad(); return renderForeman();
     }
     if (b.dataset.fmat){ fm.pick = b.dataset.fmat; fm.qty = ''; return renderForeman(); }
+    if (b.dataset.again){
+      b.disabled = true; const m = fm.data.materials.find(x => x.id === b.dataset.again);
+      const { error } = await db.rpc('ws_foreman_give', { p_pin: fm.pin, p_material: b.dataset.again, p_worker: fm.wid, p_qty: +b.dataset.q });
+      if (error){ toast(errMsg(error)); b.disabled = false; return; }
+      toast(`Given again: ${b.dataset.q} ${m ? m.unit + ' ' + m.name : ''}`);
+      await fmLoad(); renderForeman();
+      const t = v.querySelector(`[data-fmat="${b.dataset.again}"]`); if (t) t.closest('.mat-tile').classList.add('bump');
+      return;
+    }
     if (b.dataset.fq){ fm.qty = b.dataset.fq; return renderForeman(); }
     if (b.dataset.fn){ const k = b.dataset.fn;
       if (k === 'del') fm.qty = (fm.qty || '').slice(0, -1);

@@ -45,6 +45,7 @@
     ['live','fab','side','mbar'].forEach(id => $('#' + id).classList.remove('hidden'));
     document.body.classList.add('in');
     show('owner');
+    await loadSteps();
     await load();
   }
   $('#loginForm').addEventListener('submit', async e => {
@@ -258,12 +259,20 @@
 
   function pipe(o){
     const ts = S.tasks.filter(t => t.order === o.id);
-    return `<div class="pipe">${STAGES.map(s => {
-      const t = ts.find(x => x.stage === s.id);
+    const cur = ts.filter(t => t.status !== 'done').sort((a, b) => a.step - b.step)[0];
+    return `<div class="pipe">${o.stages.map(sid => {
+      const t = ts.find(x => x.stage === sid);
       const cls = !t ? 'skip' : t.status === 'done' ? 'done' : (t.status === 'working' || t.status === 'assigned') ? 'now' : '';
-      return `<div class="seg ${cls}"><i></i><em>${!t ? 'not needed' : s.short}</em></div>`;
+      return `<div class="seg ${cls}" title="${esc(stageName(sid))}"><i></i><em>${t && cur && t.id === cur.id ? esc(stageName(sid)) : ''}</em></div>`;
     }).join('')}</div>`;
   }
+
+  function stepChecks(selected, cls){
+    return `<div class="stepchecks">${stepGroups().map(g => `<div class="sg"><p class="sg-h"><b>${esc(g.grp)}</b>${g.steps.length > 1 ? `<button type="button" class="sg-all" data-sgall>all / none</button>` : ''}</p>
+      <div class="checks">${g.steps.map(st => `<label><input type="checkbox" class="${cls || ''}" value="${st.id}" ${selected === true || (selected && selected.includes(st.id)) ? 'checked' : ''}> ${esc(st.name)}</label>`).join('')}</div></div>`).join('')}</div>`;
+  }
+  document.addEventListener('click', e => { const b = e.target.closest('[data-sgall]'); if (!b) return;
+    const boxes = [...b.closest('.sg').querySelectorAll('input[type=checkbox]')]; const on = !boxes.every(x => x.checked); boxes.forEach(x => x.checked = on); });
 
   function viewOrders(){
     const active = S.orders.filter(o => !o.delivered)
@@ -322,7 +331,8 @@
       <p class="sub" style="margin-bottom:0">On the workshop screen (<a href="station.html">station.html</a>) each worker taps their name to see their job.</p></div>
       <button class="btn" data-addw>+ Add worker</button></div>
       <div class="fm-card anim"><span class="fm-ic">🔑</span><div class="grow"><b>Foreman code</b><p>${S.hasCode ? 'Set. The foreman uses it on the workshop screen to tick tools and materials.' : 'Not set yet. The foreman needs it to open his page on the workshop screen.'}</p></div><button class="btn ${S.hasCode ? 'line' : ''}" data-fmcode>${S.hasCode ? 'Change code' : 'Set code'}</button></div>
-      ${STAGES.map(s => { const ws = S.workers.filter(w => w.stage === s.id); return `<p class="section-title">${s.name}</p>
+      <div class="fm-card"><span class="fm-ic">🪜</span><div class="grow"><b>Workshop steps</b><p>${STAGES.map(x => esc(x.name)).join(' → ')}</p></div><button class="btn line" data-steps>Edit steps</button></div>
+      ${STAGES.map(s => { const ws = S.workers.filter(w => w.stage === s.id); return `<p class="section-title">${s.name}${s.grp !== s.name ? ` <span class="grp-tag">${esc(s.grp)}</span>` : ''}</p>
         <div class="list">${ws.length ? ws.map(row).join('') : '<p class="empty">No one in this step yet.</p>'}</div>`; }).join('')}`;
   }
 
@@ -361,6 +371,7 @@
     if (e.target.closest('[data-addmat]')) return materialModal();
     if (e.target.closest('[data-addtool]')) return toolModal();
     if (e.target.closest('[data-fmcode]')) return fmCodeModal();
+    if (e.target.closest('[data-steps]')) return stepsModal();
     const et = e.target.closest('[data-edittool]'); if (et) return toolModal(et.dataset.edittool);
     const tf = e.target.closest('[data-toolfound]'); if (tf){ tf.disabled = true; return act('ws_tool_found', { p_tool: tf.dataset.toolfound }, 'Marked as back'); }
     const em = e.target.closest('[data-editmat]'); if (em) return materialModal(em.dataset.editmat);
@@ -395,7 +406,7 @@
       <label class="field"><span>Note for the workshop (optional)</span><textarea id="fNote" rows="2" placeholder="e.g. Black frames, red seats. Customer collects."></textarea></label>
       <div class="field"><span>How urgent</span><div class="seg-pick" id="fUrg">
         <button type="button" data-u="normal" class="on">Normal</button><button type="button" data-u="high">High</button><button type="button" data-u="urgent">Urgent</button></div></div>
-      <div class="field"><span>Steps it needs</span><div class="checks">${STAGES.map(st => `<label><input type="checkbox" value="${st.id}" checked> ${st.name}</label>`).join('')}</div></div>
+      <div class="field"><span>Steps it needs</span>${stepChecks(true)}</div>
       <p id="fErr" style="color:var(--red);min-height:20px;font-size:13px"></p>
       <div class="actions"><button class="btn line" data-x>Cancel</button><button class="btn" id="fSave">Add to workshop</button></div>`);
     let urg = 'normal';
@@ -432,7 +443,7 @@
       <label class="field"><span>Deadline</span><input id="wDate" type="date" value="${d.toLocaleDateString('en-CA')}"></label>
       <div class="field"><span>How urgent</span><div class="seg-pick" id="wUrg">
         <button type="button" data-u="normal" class="on">Normal</button><button type="button" data-u="high">High</button><button type="button" data-u="urgent">Urgent</button></div></div>
-      <div class="field"><span>Steps it needs</span><div class="checks">${STAGES.map(st => `<label><input type="checkbox" value="${st.id}" checked> ${st.name}</label>`).join('')}</div></div>
+      <div class="field"><span>Steps it needs</span>${stepChecks(true)}</div>
       <label class="field"><span>Note for the workshop (optional)</span><textarea id="wNote" rows="2" placeholder="e.g. Black frames, red seats."></textarea></label>
       <p style="font-size:13px;color:var(--muted);margin:0">The customer's tracking page will show each step live as the workers finish them.</p>
       <p id="wErr" style="color:var(--red);min-height:20px;font-size:13px"></p>
@@ -521,6 +532,35 @@
       ${Object.keys(per).length ? `<p class="tool-hist"><b>Missing in the last 30 days:</b> ${Object.entries(per).sort((a,b) => b[1] - a[1]).map(([wid, c]) => `${esc((W(wid) || {}).name || 'Unknown')} ${c}×`).join(' · ')}</p>` : ''}
     </div>`;
   }
+  function stepsModal(){
+    const s = openModal(`<h2>Workshop steps</h2>
+      <p class="sub">Each job goes through these in order. Each step has its own workers and its own line. "Customer sees" is the simple name shown on the website.</p>
+      <div class="steps-ed">${ALL_STEPS.map((st, i) => `<div class="se ${st.active === false ? 'off' : ''}" data-sid="${st.id}">
+        <span class="se-n">${i + 1}</span>
+        <div class="grow"><input class="se-name" value="${esc(st.name)}"><label class="se-grp">Customer sees <input class="se-g" value="${esc(st.grp)}" list="grps"></label></div>
+        <span class="se-btns"><button type="button" class="mini" data-sup="${st.id}" ${i === 0 ? 'disabled' : ''}>▲</button><button type="button" class="mini" data-sdown="${st.id}" ${i === ALL_STEPS.length - 1 ? 'disabled' : ''}>▼</button>
+        <button type="button" class="se-tog" data-stog="${st.id}">${st.active === false ? 'Switched off' : 'On'}</button></span></div>`).join('')}</div>
+      <datalist id="grps">${[...new Set(ALL_STEPS.map(x => x.grp))].map(g => `<option>${esc(g)}</option>`).join('')}</datalist>
+      <div class="se-add"><input id="seNew" placeholder="New step, e.g. Polishing"><button class="btn line" id="seAdd">+ Add step</button></div>
+      <p id="seErr" class="ferr"></p>
+      <div class="actions"><button class="btn line" data-x>Close</button><button class="btn" id="seSave">Save names</button></div>`);
+    const err = m => s.querySelector('#seErr').textContent = m;
+    const refresh = async () => { await loadSteps(); await load(); stepsModal(); };
+    s.addEventListener('click', async e => {
+      const up = e.target.closest('[data-sup]'), dn = e.target.closest('[data-sdown]'), tg = e.target.closest('[data-stog]');
+      if (up || dn){ const { error } = await db.rpc('ws_move_step', { p_id: (up || dn).dataset[up ? 'sup' : 'sdown'], p_up: !!up }); if (error) return err(errMsg(error)); return refresh(); }
+      if (tg){ const st = ALL_STEPS.find(x => x.id === tg.dataset.stog);
+        if (st.active !== false && S.workers.some(w => w.active && w.stage === st.id) && !tg.dataset.sure){ tg.dataset.sure = 1; tg.textContent = 'Workers are here. Tap again'; return; }
+        const { error } = await db.rpc('ws_save_step', { p: { id: st.id, name: st.name, grp: st.grp, active: st.active === false } }); if (error) return err(errMsg(error)); return refresh(); }
+      if (e.target.id === 'seAdd'){ const n = s.querySelector('#seNew').value.trim(); if (!n) return err('Type the name of the new step');
+        const { error } = await db.rpc('ws_save_step', { p: { name: n, grp: n } }); if (error) return err(errMsg(error)); toast('Step added at the end. Use ▲ to move it.'); return refresh(); }
+      if (e.target.id === 'seSave'){
+        for (const row of s.querySelectorAll('.se')){ const st = ALL_STEPS.find(x => x.id === row.dataset.sid);
+          const name = row.querySelector('.se-name').value.trim(), grp = row.querySelector('.se-g').value.trim() || name;
+          if (name !== st.name || grp !== st.grp){ const { error } = await db.rpc('ws_save_step', { p: { id: st.id, name, grp, active: st.active !== false } }); if (error) return err(errMsg(error)); } }
+        toast('Steps saved'); closeModal(); await loadSteps(); await load(); }
+    });
+  }
   function fmCodeModal(){
     const s = openModal(`<h2>Foreman code</h2><p class="sub">4 numbers. Tell the foreman in person. Change it any time, e.g. if the foreman changes.</p>
       <label class="field"><span>New code</span><input id="fcPin" inputmode="numeric" maxlength="4" placeholder="e.g. 4821" autocomplete="off" style="font-size:24px;letter-spacing:.3em"></label>
@@ -591,7 +631,7 @@
       <label class="field"><span>Name</span><input id="mName" value="${m ? esc(m.name) : ''}" placeholder="e.g. Steel tube 1 inch" autocomplete="off"></label>
       <div class="row2"><label class="field"><span>Counted in</span><input id="mUnit" value="${m ? esc(m.unit) : ''}" placeholder="m, sheets, pcs, litres" list="units"></label>
       <label class="field"><span>Warn me when it's down to</span><input id="mLow" type="number" min="0" step="any" value="${m ? m.low : ''}" placeholder="e.g. 20"></label></div>
-      <div class="field"><span>Used in which steps (the foreman only sees it for these workers)</span><div class="checks">${STAGES.map(st => `<label><input type="checkbox" class="mStage" value="${st.id}" ${m && m.stages.includes(st.id) ? 'checked' : ''}> ${st.name}</label>`).join('')}</div></div>
+      <div class="field"><span>Used in which steps (the foreman only sees it for these workers)</span>${stepChecks(m ? m.stages : [], 'mStage')}</div>
       <datalist id="units"><option>m</option><option>pcs</option><option>sheets</option><option>litres</option><option>kg</option><option>rolls</option></datalist>
       ${m ? '' : '<p class="sub" style="font-size:13px">Starts at 0. Then tap <b>Received</b> to add what is in the store now.</p>'}
       <p id="mErr" class="ferr"></p>
@@ -676,7 +716,7 @@
     const s = openModal(`
       <h2>${w ? 'Edit ' + esc(w.name) : 'Add a worker'}</h2>
       <label class="field"><span>Name</span><input id="wName" value="${w ? esc(w.name) : ''}" placeholder="e.g. Odhiambo" autocomplete="off"></label>
-      <label class="field"><span>Works in</span><select id="wStage" ${w && w.task ? 'disabled' : ''}>${STAGES.map(st => `<option value="${st.id}" ${w && w.stage === st.id ? 'selected' : ''}>${st.name}</option>`).join('')}</select>
+      <label class="field"><span>Works in</span><select id="wStage" ${w && w.task ? 'disabled' : ''}>${stepGroups().map(g => `<optgroup label="${esc(g.grp)}">${g.steps.map(st => `<option value="${st.id}" ${w && w.stage === st.id ? 'selected' : ''}>${esc(st.name)}</option>`).join('')}</optgroup>`).join('')}</select>
         ${w && w.task ? '<small style="color:var(--muted)">Can change step once their current job is finished.</small>' : ''}</label>
       <p style="font-size:13px;color:var(--muted)">They go in on the workshop screen by tapping their name.</p>
       <p id="wErr" style="color:var(--red);min-height:20px;font-size:13px"></p>
@@ -739,7 +779,7 @@
       : (sw() ? `Tahadhari. ${w} amesimama kazi. ${SW_REASON[t.problem.reason] || t.problem.reason}. Oda ${sayRef(o.ref)}.`
               : `Alert. ${w} has stopped work. ${t.problem.reason}. Order ${sayRef(o.ref)}, ${stageName(t.stage)}.`),
     problem: (w, t) => sw() ? `${w} ana shida. ${SW_REASON[t.problem.reason] || t.problem.reason}. Bado anaendelea na kazi.` : `${w} reported a problem. ${t.problem.reason}. They are still working.`,
-    finished: (w, o, next) => sw() ? `${w} amemaliza ${o.item}. ${next ? 'Imeenda ' + SW_STAGE[next] + '.' : 'Iko tayari kupelekwa.'}`
+    finished: (w, o, next) => sw() ? `${w} amemaliza ${o.item}. ${next ? 'Imeenda ' + (SW_STAGE[next] || stageName(next)) + '.' : 'Iko tayari kupelekwa.'}`
                                    : `${w} finished the ${o.item.toLowerCase()}. ${next ? 'It has gone to ' + stageName(next) + '.' : 'It is ready for delivery.'}`,
     web: (w) => sw() ? `Oda mpya kutoka kwa website. ${w.customer_name}.` : `New order from the website. ${w.customer_name}.`,
     waiting: w => sw() ? `${w} anasubiri kazi.` : `${w} is waiting for work.`,
