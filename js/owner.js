@@ -120,7 +120,7 @@
   }
 
   /* ---------- views ---------- */
-  document.querySelectorAll('.tabs [data-tab]').forEach(b => b.addEventListener('click', () => { tab = b.dataset.tab; orderFilter = null; enter = true; render(); window.scrollTo(0,0); load(); }));
+  document.querySelectorAll('.tabs [data-tab]').forEach(b => b.addEventListener('click', () => { tab = b.dataset.tab; orderFilter = null; enter = true; render(); window.scrollTo(0,0); load(); if (tab === 'history') loadHistory(); }));
   $('#newOrderBtn').onclick = $('#fab').onclick = () => newOrderModal();
 
   function attention(){
@@ -352,6 +352,91 @@
         <div class="list">${ws.length ? ws.map(row).join('') : '<p class="empty">No one in this step yet.</p>'}</div>`; }).join('')}`;
   }
 
+
+  /* ---------- history: look back at any day ---------- */
+  const H = { day: null, worker: '', data: null, loading: false, err: '' };
+  const hm = ts => ts ? new Date(ts).toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', timeZone:'Africa/Nairobi' }) : '';
+  const addDays = (day, n) => { const d = new Date(day + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  async function loadHistory(day){
+    H.day = day || H.day || todayStr(); H.loading = true; H.err = ''; if (tab === 'history') render();
+    const want = H.day;
+    const { data, error } = await db.rpc('ws_history', { p_day: want });
+    if (want !== H.day) return;
+    H.loading = false;
+    if (error){ H.err = errMsg(error); H.data = null; } else H.data = data;
+    if (tab === 'history' && !document.querySelector('.scrim')) render();
+  }
+  function viewHistory(){
+    if (!H.day) H.day = todayStr();
+    const today = todayStr(), isToday = H.day === today, d = H.data && H.data.day && String(H.data.day).slice(0, 10) === H.day ? H.data : null;
+    const nm = id => { const w = W(id); return w ? w.name : 'Someone'; };
+    const byW = x => !H.worker || x.worker === H.worker;
+    const label = new Date(H.day + 'T12:00:00').toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+    const head = `
+      <div style="display:flex;justify-content:space-between;align-items:end;gap:12px;flex-wrap:wrap"><div><h2>History</h2>
+      <p class="sub" style="margin-bottom:0">Look back at any day: who came, what got done, which tools and materials went out.</p></div>
+      <button class="btn line" data-hprint>🖨 Print this day</button></div>
+      <div class="h-bar anim">
+        <button class="btn line h-arrow" data-hday="-1" aria-label="Day before">‹</button>
+        <label class="h-date"><b>${isToday ? 'Today' : H.day === addDays(today, -1) ? 'Yesterday' : esc(label.split(' ')[0])}</b><span>${esc(label)}</span><input type="date" id="hDate" value="${H.day}" max="${today}"></label>
+        <button class="btn line h-arrow" data-hday="1" ${isToday ? 'disabled' : ''} aria-label="Next day">›</button>
+        <select id="hWorker" class="h-who"><option value="">Everyone</option>${S.workers.filter(w => w.active || (d && d.attendance.some(a => a.worker === w.id))).map(w => `<option value="${w.id}" ${H.worker === w.id ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}</select>
+        ${isToday ? '' : '<button class="btn sm line" data-hday="today">Back to today</button>'}
+      </div>`;
+    if (H.err) return head + `<p class="empty">Couldn't load this day. ${esc(H.err)}${/ws_history|function/i.test(H.err) ? '<br>Run <b>update-8-history.sql</b> in Supabase first.' : ''}</p>`;
+    if (!d) return head + '<p class="empty">Loading…</p>';
+
+    const att = new Map(d.attendance.map(a => [a.worker, a]));
+    const people = S.workers.filter(w => (w.active || att.has(w.id)) && byW({ worker:w.id }));
+    const came = d.attendance.filter(a => !a.away), away = d.attendance.filter(a => a.away);
+    const jobs = d.jobs.filter(byW), tools = d.tools.filter(byW), mats = d.materials.filter(byW);
+    const notBack = tools.filter(t => !t.back);
+    const selName = H.worker ? nm(H.worker) : '';
+    const log = d.log.filter(g => !H.worker || g.text.includes(selName));
+    const alarms = log.filter(g => g.kind === 'alert');
+
+    const sum = (n, l, k) => `<div class="h-sum-c ${k}"><b>${n}</b><span>${l}</span></div>`;
+    const sec = (title, n, body, empty) => `<p class="section-title">${title}${n != null ? ` <span class="grp-tag">${n}</span>` : ''}</p>
+      <div class="list">${body || `<p class="empty">${empty}</p>`}</div>`;
+    const kindTxt = { out:'Given out', back:'Brought back', in:'Came into store', count:'Stock count' };
+
+    return head + `
+      <div class="h-sum anim">
+        ${H.worker ? sum(att.has(H.worker) ? (att.get(H.worker).away ? 'Away' : hm(att.get(H.worker).at)) : (isToday ? '—' : 'No'), att.has(H.worker) && !att.get(H.worker).away ? 'Came in at' : 'Came in', 'k1')
+          : sum(came.length, 'Came in', 'k1') + sum(away.length, 'Away', 'k2')}
+        ${sum(jobs.length, 'Jobs finished', 'k3')}
+        ${sum(tools.length, 'Tools taken', 'k4')}
+        ${sum(notBack.length, isToday ? 'Tools still out' : 'Tools not back', notBack.length && !isToday ? 'k5 bad' : 'k5')}
+      </div>
+
+      ${sec('👷 Who came in', came.length + (H.worker ? '' : ' of ' + people.length), people.map(w => { const a = att.get(w.id);
+        const chip = a ? (a.away ? '<span class="pill p-normal">Away</span>' : `<span class="in-chip">✓ In ${hm(a.at)}</span>`) : `<span class="pill p-normal">${isToday ? 'Not in yet' : "Didn't come"}</span>`;
+        return `<div class="item"><div class="grow"><div class="t">${esc(w.name)}</div><div class="s">${esc(stageName(w.stage))}</div></div>${chip}</div>`; }).join(''), 'No workers.')}
+
+      ${sec('✅ Jobs finished', jobs.length, jobs.map(j => `<div class="item"><span class="h-time">${hm(j.done)}</span><div class="grow"><div class="t">${esc(j.ref)} · ${esc(stageName(j.stage))}</div>
+        <div class="s">${esc(nm(j.worker))} · ${j.qty} × ${esc(j.item)}${j.started ? ` · started ${hm(j.started)}` : ''}</div></div></div>`).join(''), 'No jobs finished this day.')}
+
+      ${sec('🔧 Tools', tools.length, tools.map(t => {
+        return `<div class="item"><div class="grow"><div class="t">${esc(t.tool)}</div><div class="s">${esc(nm(t.worker))}</div></div>
+        <span class="h-tl">Out ${new Date(t.out).toLocaleDateString('en-CA', { timeZone:'Africa/Nairobi' }) === H.day ? hm(t.out) : 'earlier'} → ${t.back ? `<b class="ok">Back ${new Date(t.back).toLocaleDateString('en-CA', { timeZone:'Africa/Nairobi' }) === H.day ? hm(t.back) : 'later'}</b>` : `<b class="${isToday ? '' : 'bad'}">${isToday ? 'Still out' : 'Not back'}</b>`}</span></div>`; }).join('')
+        + (d.check && !H.worker ? `<div class="item"><span class="h-time">${hm(d.check.at)}</span><div class="grow"><div class="t">Evening tool check done</div><div class="s">${d.check.missing ? d.check.missing + ' missing' : 'All tools back'}</div></div></div>` : '')
+        + d.missing.filter(byW).map(m => `<div class="item"><div class="grow"><div class="t">Missing: ${esc(m.tool)}</div><div class="s">${m.worker ? 'Normally with ' + esc(nm(m.worker)) : ''}${m.found ? ' · found later' : ''}</div></div><span class="pill ${m.found ? 'p-normal' : 'p-attention'}">${m.found ? 'Found' : 'Missing'}</span></div>`).join(''),
+        'No tools taken this day.')}
+
+      ${sec('📦 Materials', mats.length, mats.map(m => `<div class="item"><span class="h-time">${hm(m.at)}</span><div class="grow"><div class="t">${esc(m.material)} · ${n2(Math.abs(+m.qty))} ${esc(m.unit)}</div>
+        <div class="s">${kindTxt[m.kind] || esc(m.kind)}${m.worker ? ' · ' + esc(nm(m.worker)) : ''}${m.note ? ' · ' + esc(m.note) : ''}</div></div></div>`).join(''), 'No materials moved this day.')}
+
+      ${alarms.length ? sec('🚨 Alarms', alarms.length, alarms.map(g => `<div class="item"><span class="h-time">${hm(g.at)}</span><div class="grow"><div class="t">${esc(g.text)}</div></div></div>`).join(''), '') : ''}
+
+      <details class="h-all"><summary>Everything that happened (${log.length})</summary>
+        <div class="list">${log.length ? log.map(g => `<div class="item"><span class="h-time">${hm(g.at)}</span><div class="grow"><div class="s h-${g.kind}">${esc(g.text)}</div></div></div>`).join('') : '<p class="empty">Nothing.</p>'}</div>
+      </details>`;
+  }
+  document.addEventListener('change', e => {
+    if (e.target.id === 'hDate' && e.target.value){ loadHistory(e.target.value > todayStr() ? todayStr() : e.target.value); }
+    if (e.target.id === 'hWorker'){ H.worker = e.target.value; render(); }
+  });
+
   function waitingWeb(){
     const linked = new Set(S.orders.map(o => o.src).filter(Boolean));
     return (S.web || []).filter(w => !linked.has(w.id));
@@ -370,7 +455,7 @@
     const n = attention().filter(a => a.lvl === 'red').length;
     $('#attnBadge').textContent = n || ''; $('#attnBadge').style.display = n ? '' : 'none';
     const v = $('#view');
-    v.innerHTML = tab === 'today' ? viewToday() : tab === 'orders' ? viewOrders() : tab === 'workers' ? viewWorkers() : tab === 'stock' ? viewStock() : viewWorkshop();
+    v.innerHTML = tab === 'today' ? viewToday() : tab === 'orders' ? viewOrders() : tab === 'workers' ? viewWorkers() : tab === 'stock' ? viewStock() : tab === 'history' ? viewHistory() : viewWorkshop();
     v.classList.toggle('enter', enter);
     if (enter){ v.querySelectorAll('[data-count]').forEach(countUp); }
     else v.querySelectorAll('.kpi.pop [data-count]').forEach(countUp);
@@ -380,6 +465,8 @@
   /* ---------- clicks ---------- */
   document.addEventListener('click', async e => {
     if (e.target.closest('[data-addw]')) return workerModal();
+    const hd = e.target.closest('[data-hday]'); if (hd){ return loadHistory(hd.dataset.hday === 'today' ? todayStr() : (x => x > todayStr() ? todayStr() : x)(addDays(H.day || todayStr(), +hd.dataset.hday))); }
+    if (e.target.closest('[data-hprint]')){ document.querySelectorAll('.h-all').forEach(x => x.open = true); return window.print(); }
     const wb = e.target.closest('[data-web]'); if (wb) return webModal(wb.dataset.web);
     const gb = e.target.closest('[data-go]'); if (gb){ const [t, f] = gb.dataset.go.split(':'); tab = t; orderFilter = f || null; enter = true; render(); window.scrollTo(0,0); return; }
     const mvb = e.target.closest('[data-move]'); if (mvb) return moveModal(mvb.dataset.move, mvb.dataset.mat);
