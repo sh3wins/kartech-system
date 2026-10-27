@@ -211,3 +211,6 @@ body.sw{background:var(--paper);color:var(--ink)}
 .in-ok{font-weight:800;color:#0F3D2E;background:#EEF9D6;border-radius:20px;padding:6px 12px}
 .link-sm{color:#66736B;text-decoration:underline;font-size:14px}
 #fmDone{margin-top:10px}
+
+.sw-card .with{margin:6px 0 2px;font-size:17px;color:var(--deep,#0F3D2E)}
+.sw-card .with b{font-weight:800}

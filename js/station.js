@@ -234,6 +234,7 @@
         <p class="ref">${esc(o.ref)}</p>
         <p class="big">${o.qty} × ${esc(o.item)}</p>
         <p class="step">${stageName(t.stage)}${working ? ' · <span class="on">in progress</span>' : ''}</p>
+        ${t.with ? `<p class="with">👥 Together with <b>${esc(t.with)}</b></p>` : ''}
         <div class="tags"><span class="tag u-${o.urgency}">${o.urgency === 'normal' ? 'Normal' : '● ' + URG_NAME[o.urgency] + ' priority'}</span><span class="tag due">◷ Due ${fmtDay(new Date(o.deadline + 'T17:00'))}</span><span class="tag">Then: ${job.after ? stageName(job.after) : 'Delivery'}</span></div>
         ${o.notes ? `<div class="note">📝 ${esc(o.notes)}</div>` : ''}
         ${mats.length ? `<div class="note mats-given"><b>📦 Materials given to you for this job</b><br>${mats.map(m => `${+(+m.qty).toFixed(2)} ${esc(m.unit)} ${esc(m.name)}`).join(' · ')}<br><small>Bring anything left over back to the store.</small></div>` : ''}

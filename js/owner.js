@@ -12,6 +12,7 @@
   const W = id => S.workers.find(w => w.id === id);
   const O = id => S.orders.find(o => o.id === id);
   const T = id => S.tasks.find(t => t.id === id);
+  const taskNames = t => { const ns = S.workers.filter(w => w.task === t.id).map(w => w.name); if (!ns.length && t.worker && W(t.worker)) ns.push(W(t.worker).name); return ns.join(' & ') || 'A worker'; };
   const queue = stage => S.tasks.filter(t => t.stage === stage && t.status === 'queued').sort((a,b) => a.rank - b.rank);
   const show = id => ['loginView','setupView','owner'].forEach(v => $('#' + v).classList.toggle('hidden', v !== id));
 
@@ -94,8 +95,8 @@
       S.hasCode = hc.error ? null : !!hc.data;
       S.toolMissing = tm.error ? [] : tm.data.map(x => ({ tool:x.tool_id, worker:x.worker_id, since:String(x.since).slice(0, 10), found: !!x.found_at }));
       S.std = sd.error ? [] : sd.data.map(x => ({ product:x.product, mat:x.material_id, per:+x.per_piece }));
-      S.orders = o.data.map(x => ({ id:x.id, ref:x.ref, src:x.source_order_id || null, srcNo:x.source_no || null, customer:x.customer, item:x.item, qty:x.qty, deadline:new Date(x.deadline + 'T17:00'), urgency:x.urgency, notes:x.notes, stages:x.stages, delivered: !!x.delivered_at }));
-      S.tasks = t.data.map(x => ({ id:x.id, order:x.order_id, step:x.step, stage:x.stage, status:x.status, worker:x.worker_id, rank:x.rank,
+      S.orders = o.data.map(x => ({ id:x.id, ref:x.ref, src:x.source_order_id || null, srcNo:x.source_no || null, customer:x.customer, item:x.item, qty:x.qty, deadline:new Date(x.deadline + 'T17:00'), dl:String(x.deadline).slice(0, 10), urgency:x.urgency, notes:x.notes, stages:x.stages, delivered: !!x.delivered_at }));
+      S.tasks = t.data.map(x => ({ id:x.id, order:x.order_id, step:x.step, stage:x.stage, status:x.status, worker:x.worker_id, rank:x.rank, planned: Array.isArray(x.planned) ? x.planned : String(x.planned || '').replace(/[{}]/g, '').split(',').filter(Boolean),
         problem: x.problem_at ? { reason:x.problem_reason, at:new Date(x.problem_at).getTime(), stopped:!!x.problem_stopped, ack: !!x.problem_ack_at } : null }));
       S.log = l.data.map(x => ({ id:x.id, text:x.text, kind:x.kind, at:new Date(x.at).getTime(), order:x.order_id }));
       loaded = true;
@@ -498,6 +499,39 @@
   function closeModal(){ document.querySelector('.scrim')?.remove(); }
   function openModal(html){ closeModal(); const s = document.createElement('div'); s.className = 'scrim'; s.innerHTML = `<div class="modal">${html}</div>`; s.addEventListener('click', e => { if (e.target === s || e.target.closest('[data-x]')) closeModal(); }); document.body.appendChild(s); return s; }
 
+
+  /* ---------- steps + who does each one (new order / edit) ---------- */
+  // stages: ticked steps (true = all) · people: {stage:[ids]} · lock: {stage:'done'|'started'}
+  function stepPeople(stages, people, lock){
+    people = people || {}; lock = lock || {};
+    const can = st => S.workers.filter(w => w.active && (w.stage === st || (w.covers || []).includes(st)))
+      .sort((a, b) => (b.stage === st) - (a.stage === st) || a.name.localeCompare(b.name));
+    const state = w => { if (w.away) return 'away'; if (!w.here) return 'not in'; const t = w.task && T(w.task), o = t && O(t.order); return o ? 'on ' + o.ref : 'free'; };
+    return `<div class="sp">${stepGroups().map(g => `<p class="sp-g">${esc(g.grp)}</p>${g.steps.map(st => {
+      const on = stages === true || (stages || []).includes(st.id) || !!lock[st.id], l = lock[st.id], picked = people[st.id] || [], ws = can(st.id);
+      return `<div class="sp-row ${on ? 'on' : ''} ${l ? 'lk' : ''}" data-st="${st.id}">
+        <label class="sp-step"><input type="checkbox" class="spStage" value="${st.id}" ${on ? 'checked' : ''} ${l ? 'disabled' : ''}><span>${esc(st.name)}</span>${l ? `<small>${l === 'done' ? '✓ done' : 'in progress'}</small>` : ''}</label>
+        <div class="sp-who">${l === 'done' ? '' : ws.length ? ws.map(w => `<button type="button" class="sp-w ${picked.includes(w.id) ? 'pk' : ''}" data-w="${w.id}"><b>${esc(w.name)}</b><small>${w.stage !== st.id ? 'can cover · ' : ''}${state(w)}</small></button>`).join('')
+          + `<span class="sp-any">${picked.length ? '' : 'Anyone free'}</span>` : '<span class="sp-any">No workers for this step yet</span>'}</div>
+      </div>`; }).join('')}`).join('')}
+      <p class="hint-sm">Tick the steps. Under each one, tap who does it, 1 or 2 people. Nobody picked = whoever is free.</p></div>`;
+  }
+  function bindStepPeople(root){
+    root.addEventListener('change', e => { const c = e.target.closest('.spStage'); if (!c) return; c.closest('.sp-row').classList.toggle('on', c.checked); });
+    root.addEventListener('click', e => { const b = e.target.closest('.sp-w'); if (!b) return;
+      const row = b.closest('.sp-row'); const box = row.querySelector('.spStage');
+      if (!box.checked && !box.disabled){ box.checked = true; row.classList.add('on'); }
+      if (!b.classList.contains('pk')){ const pk = [...row.querySelectorAll('.sp-w.pk')]; if (pk.length >= 2) pk[0].classList.remove('pk'); }
+      b.classList.toggle('pk');
+      const any = row.querySelector('.sp-any'); if (any) any.textContent = row.querySelector('.sp-w.pk') ? '' : 'Anyone free'; });
+  }
+  function readStepPeople(root){
+    const stages = [], people = {};
+    root.querySelectorAll('.sp-row').forEach(r => { const box = r.querySelector('.spStage'); if (!box.checked) return;
+      stages.push(box.value); people[box.value] = [...r.querySelectorAll('.sp-w.pk')].map(b => b.dataset.w); });
+    return { stages, people };
+  }
+
   function newOrderModal(){
     const d = new Date(); d.setDate(d.getDate() + 7);
     const iso = d.toLocaleDateString('en-CA');
@@ -512,25 +546,76 @@
       <label class="field"><span>Note for the workshop (optional)</span><textarea id="fNote" rows="2" placeholder="e.g. Black frames, red seats. Customer collects."></textarea></label>
       <div class="field"><span>How urgent</span><div class="seg-pick" id="fUrg">
         <button type="button" data-u="normal" class="on">Normal</button><button type="button" data-u="high">High</button><button type="button" data-u="urgent">Urgent</button></div></div>
-      <div class="field"><span>Steps it needs</span>${stepChecks(true)}</div>
+      <div class="field"><span>Steps and who does them</span>${stepPeople(true)}</div>
       <p id="fErr" style="color:var(--red);min-height:20px;font-size:13px"></p>
       <div class="actions"><button class="btn line" data-x>Cancel</button><button class="btn" id="fSave">Add to workshop</button></div>`);
-    let urg = 'normal';
+    let urg = 'normal'; bindStepPeople(s);
     s.querySelector('#fUrg').addEventListener('click', e => { const b = e.target.closest('[data-u]'); if (!b) return; urg = b.dataset.u; s.querySelectorAll('#fUrg button').forEach(x => x.classList.toggle('on', x === b)); });
     s.querySelector('#fSave').onclick = async () => {
       const customer = s.querySelector('#fCust').value.trim(), item = s.querySelector('#fItem').value.trim();
       const qty = parseInt(s.querySelector('#fQty').value, 10) || 0;
-      const stages = [...s.querySelectorAll('.checks input:checked')].map(x => x.value);
+      const { stages, people } = readStepPeople(s);
       if (!customer || !item || qty < 1) return s.querySelector('#fErr').textContent = 'Fill in the customer, what, and how many.';
       if (!stages.length) return s.querySelector('#fErr').textContent = 'Pick at least one step.';
       const btn = s.querySelector('#fSave'); btn.disabled = true; btn.textContent = 'Adding…';
-      const { data, error } = await db.rpc('ws_create_order', { p: { customer, item, qty, deadline: s.querySelector('#fDate').value || null, urgency: urg, stages, notes: s.querySelector('#fNote').value.trim() } });
+      const { data, error } = await db.rpc('ws_create_order', { p: { customer, item, qty, deadline: s.querySelector('#fDate').value || null, urgency: urg, stages, people, notes: s.querySelector('#fNote').value.trim() } });
       if (error){ btn.disabled = false; btn.textContent = 'Add to workshop'; s.querySelector('#fErr').textContent = errMsg(error); return; }
       closeModal(); tab = 'orders'; await load();
       const o = S.orders.find(x => x.ref === data); const t = o && S.tasks.find(x => x.order === o.id && x.worker);
-      toast(t ? `${data} added. ${W(t.worker)?.name || 'A worker'} has it now.` : `${data} added to the line.`);
+      const first = o && S.tasks.filter(x => x.order === o.id).sort((a, b) => a.step - b.step)[0];
+      const wait = first && !first.worker && first.planned.length ? first.planned.map(id => W(id)?.name).filter(Boolean).join(' & ') : '';
+      toast(t ? `${data} added. ${taskNames(t)} has it now.` : wait ? `${data} added. Waiting for ${wait} to be free.` : `${data} added to the line.`);
     };
     setTimeout(() => s.querySelector('#fCust').focus(), 50);
+  }
+
+
+  /* ---------- edit / delete an order (typed something wrong) ---------- */
+  function editOrderModal(id){
+    const o = O(id); if (!o) return;
+    const ts = S.tasks.filter(t => t.order === o.id);
+    const lock = {}; ts.forEach(t => { if (['done','assigned','working'].includes(t.status)) lock[t.stage] = t.status === 'done' ? 'done' : 'started'; });
+    const s = openModal(`
+      <h2>Edit ${esc(o.ref)}</h2>
+      <p class="sub" style="margin-top:-6px">Fix anything that was typed wrong. The workshop sees the change straight away.</p>
+      <label class="field"><span>Customer</span><input id="eCust" value="${esc(o.customer)}" autocomplete="off"></label>
+      <div class="row2">
+        <label class="field"><span>What</span><input id="eItem" value="${esc(o.item)}" autocomplete="off"></label>
+        <label class="field"><span>How many</span><input id="eQty" type="number" min="1" value="${o.qty}"></label>
+      </div>
+      <label class="field"><span>Deadline</span><input id="eDate" type="date" value="${o.dl}"></label>
+      <label class="field"><span>Note for the workshop</span><textarea id="eNote" rows="2">${esc(o.notes || '')}</textarea></label>
+      <div class="field"><span>How urgent</span><div class="seg-pick" id="eUrg">
+        ${['normal','high','urgent'].map(u => `<button type="button" data-u="${u}" class="${o.urgency === u ? 'on' : ''}">${URG_NAME[u]}</button>`).join('')}</div></div>
+      <div class="field"><span>Steps and who does them</span>${stepPeople(o.stages, Object.fromEntries(ts.map(t => [t.stage, t.planned])), lock)}
+        ${Object.keys(lock).length ? '<p class="hint-sm">Steps already done or being worked on can\'t be removed.</p>' : ''}</div>
+      <p id="eErr" style="color:var(--red);min-height:20px;font-size:13px"></p>
+      <div class="actions" style="justify-content:space-between">
+        <button class="btn red line" id="eDel">🗑 Delete order</button>
+        <span style="display:flex;gap:10px"><button class="btn line" data-x>Cancel</button><button class="btn" id="eSave">Save changes</button></span>
+      </div>`);
+    let urg = o.urgency; bindStepPeople(s);
+    s.querySelector('#eUrg').addEventListener('click', e => { const b = e.target.closest('[data-u]'); if (!b) return; urg = b.dataset.u; s.querySelectorAll('#eUrg button').forEach(x => x.classList.toggle('on', x === b)); });
+    s.querySelector('#eSave').onclick = async () => {
+      const customer = s.querySelector('#eCust').value.trim(), item = s.querySelector('#eItem').value.trim();
+      const qty = parseInt(s.querySelector('#eQty').value, 10) || 0;
+      const { stages, people } = readStepPeople(s);
+      if (!customer || !item || qty < 1) return s.querySelector('#eErr').textContent = 'Fill in the customer, what, and how many.';
+      if (!stages.length) return s.querySelector('#eErr').textContent = 'Pick at least one step.';
+      const btn = s.querySelector('#eSave'); btn.disabled = true; btn.textContent = 'Saving…';
+      const { error } = await db.rpc('ws_edit_order', { p: { id: o.id, customer, item, qty, deadline: s.querySelector('#eDate').value || null, urgency: urg, stages, people, notes: s.querySelector('#eNote').value.trim() } });
+      if (error){ btn.disabled = false; btn.textContent = 'Save changes'; s.querySelector('#eErr').textContent = /ws_edit_order/.test(errMsg(error)) ? 'Run update-9-edit-orders.sql in Supabase first.' : errMsg(error); return; }
+      closeModal(); toast(`${o.ref} updated`); await load(); orderModal(o.id);
+    };
+    const del = s.querySelector('#eDel'); let sure = false;
+    del.onclick = async () => {
+      if (!sure){ sure = true; del.classList.remove('line'); del.textContent = 'Tap again to delete';
+        s.querySelector('#eErr').textContent = `This removes ${o.ref} from the workshop. Anyone working on it gets their next job.`; setTimeout(() => { if (document.body.contains(del) && sure){ sure = false; del.classList.add('line'); del.textContent = '🗑 Delete order'; s.querySelector('#eErr').textContent = ''; } }, 5000); return; }
+      del.disabled = true; del.textContent = 'Deleting…';
+      const { error } = await db.rpc('ws_delete_order', { p_order: o.id });
+      if (error){ del.disabled = false; del.textContent = '🗑 Delete order'; s.querySelector('#eErr').textContent = /ws_delete_order/.test(errMsg(error)) ? 'Run update-9-edit-orders.sql in Supabase first.' : errMsg(error); return; }
+      closeModal(); toast(`${o.ref} deleted`); await load();
+    };
   }
 
   function webModal(id){
@@ -581,13 +666,15 @@
       ${(() => { const use = orderUse(o); return use.length ? `<p class="section-title">Materials</p><div class="steps">${use.map(r => { const m = M(r.mat);
         return `<div class="step"><div style="flex:1"><b>${esc(m.name)}</b><div style="color:var(--muted);font-size:13px">Given ${n2(r.given)} ${esc(m.unit)}${r.normal != null ? ` · normal ${n2(r.normal)} ${esc(m.unit)}` : ''}</div></div>${r.over ? '<span class="pill p-attention">More than normal</span>' : r.normal != null ? '<span class="pill p-working">OK</span>' : ''}</div>`; }).join('')}</div>` : ''; })()}
       <p class="section-title">Steps</p>
-      <div class="steps">${ts.map(t => { const [k, l] = lbl(t); const w = t.worker && W(t.worker); return `<div class="step"><div style="flex:1"><b>${stageName(t.stage)}</b><div style="color:var(--muted);font-size:13px">${w ? esc(w.name) : 'Not given to anyone yet'}${t.problem ? ` · ⚠ ${esc(t.problem.reason)}` : ''}</div></div><span class="pill p-${k}">${l}</span>${t.problem ? `<button class="btn sm" data-solve="${t.id}">Solved</button>` : ''}${['queued','assigned','working'].includes(t.status) && !o.delivered ? `<button class="btn sm line" data-give="${t.id}">${t.worker ? 'Change' : 'Give to…'}</button>` : ''}</div>`; }).join('')}</div>
+      <div class="steps">${ts.map(t => { const [k, l] = lbl(t); const w = t.worker && W(t.worker); const plan = t.planned.map(id => W(id)?.name).filter(Boolean).join(' & '); return `<div class="step"><div style="flex:1"><b>${stageName(t.stage)}</b><div style="color:var(--muted);font-size:13px">${w ? esc(taskNames(t)) + (x => x ? ` · ${esc(x)} joins when free` : '')(t.planned.filter(id => !S.workers.some(v => v.id === id && v.task === t.id)).map(id => W(id)?.name).filter(Boolean).join(' & ')) : plan ? '👤 For ' + esc(plan) : 'Whoever is free'}${t.problem ? ` · ⚠ ${esc(t.problem.reason)}` : ''}</div></div><span class="pill p-${k}">${l}</span>${t.problem ? `<button class="btn sm" data-solve="${t.id}">Solved</button>` : ''}${['queued','assigned','working'].includes(t.status) && !o.delivered ? `<button class="btn sm line" data-give="${t.id}">${t.worker ? 'Change' : 'Give to…'}</button>` : ''}</div>`; }).join('')}</div>
       ${!o.delivered && o.urgency !== 'urgent' && !p.finished ? `<p style="margin-top:14px;font-size:13px;color:var(--muted)">Customer pushing? Make it urgent and it jumps to the front of every line. No one's current job gets interrupted.</p>` : ''}
       <div class="actions">
         ${!o.delivered && o.urgency !== 'urgent' && !p.finished ? `<button class="btn red" id="mkUrgent">Make urgent</button>` : ''}
         ${p.finished && !o.delivered ? `<button class="btn" data-deliver="${o.id}">Mark delivered</button>` : ''}
+        ${!o.delivered ? `<button class="btn line" id="edOrder">✏️ Edit</button>` : ''}
         <button class="btn line" data-x>Close</button>
       </div>`);
+    const eb = $('#edOrder'); if (eb) eb.onclick = () => editOrderModal(o.id);
     const u = $('#mkUrgent');
     if (u) u.onclick = async () => { u.disabled = true; closeModal(); await act('ws_make_urgent', { p_order: o.id }, `${o.ref} is now urgent`); };
   }
