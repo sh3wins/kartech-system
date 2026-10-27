@@ -79,24 +79,33 @@
     const d = fm.data;
     if (fm.view === 'home'){
       const out = d.tools.filter(t => t.with);
-      v.innerHTML = head('Foreman', 'Tap a worker to tick the tools and materials they take.') + `
+      const notIn = d.workers.filter(w => !w.in), inn = d.workers.filter(w => w.in);
+      const card = w => { const n = d.tools.filter(t => t.with === w.id).length;
+        return `<button class="name fmname ${w.in ? 'in' : 'notin'}" data-fw="${w.id}"><span class="av">${w.in ? '✓' : esc(w.name.charAt(0))}</span><span>${esc(w.name)}<small>${w.in
+          ? `In ${w.arrived_at ? fmTime(w.arrived_at) : ''}${n ? ' · 🔧 ' + n : ''}${w.job ? ' · ' + esc(w.job.ref) : ''}`
+          : w.away ? 'Away today' : esc(stageName(w.stage)) + ' · tap when they arrive'}</small></span></button>`; };
+      v.innerHTML = head('Foreman', 'When a worker walks in, tap their name. Their tools pop up. Tick what they take.') + `
         <button class="tc-banner anim ${checkNeeded() ? 'due' : ''}" id="fmCheck" style="--i:1"><span>🔧</span><span><b>${d.done_today ? 'Tool check done for today ✓' : 'Evening tool check'}</b><small>${out.length ? out.length + ' tool' + (out.length > 1 ? 's' : '') + ' out right now' : 'All tools are in'}</small></span></button>
-        ${STAGES.map((s, gi) => { const ws = d.workers.filter(w => w.stage === s.id); return ws.length ? `<div class="st-group anim" style="--i:${gi + 2}"><h4>${s.name}</h4><div class="names">${ws.map(w => { const n = d.tools.filter(t => t.with === w.id).length;
-          return `<button class="name fmname" data-fw="${w.id}"><span class="av">${esc(w.name.charAt(0))}</span><span>${esc(w.name)}<small>${n ? '🔧 ' + n + ' tool' + (n > 1 ? 's' : '') : ''}${w.job ? (n ? ' · ' : '') + esc(w.job.ref) : ''}</small></span></button>`; }).join('')}</div></div>` : ''; }).join('')}`;
+        ${notIn.length ? `<div class="st-group anim" style="--i:2"><h4>Not in yet · ${notIn.length}</h4><div class="names">${notIn.map(card).join('')}</div></div>` : ''}
+        ${inn.length ? `<div class="st-group anim" style="--i:3"><h4>In today · ${inn.length}</h4><div class="names">${inn.map(card).join('')}</div></div>` : ''}`;
       return;
     }
     if (fm.view === 'worker'){
       const w = fmW(fm.wid); if (!w){ fm.view = 'home'; return renderForeman(); }
       const mats = d.materials.filter(m => !m.stages || !m.stages.length || m.stages.includes(w.stage));
-      const tl = d.tools.slice().sort((a, b) => (b.with === w.id) - (a.with === w.id) || (b.usual === w.id) - (a.usual === w.id) || a.name.localeCompare(b.name));
-      v.innerHTML = head(esc(w.name), `${stageName(w.stage)}${w.job ? ` · on <b>${esc(w.job.ref)}</b>, ${w.job.qty} × ${esc(w.job.item)}` : ' · no job right now'}`, true) + `
-        <div class="st-group anim" style="--i:1"><h4>Tools · tap when he takes it, tap again when it comes back</h4><div class="tc-grid">${tl.map(t => {
-          const mine = t.with === w.id, other = t.with && !mine;
-          return `<button class="tc ${mine ? 'out' : other ? 'other' : ''}" data-ft="${t.id}"><span class="tc-ic">${mine ? '↗' : other ? '•' : '✓'}</span><span><b>${esc(t.name)}</b><small>${mine ? 'With ' + esc(w.name) + ' since ' + fmTime(t.since) : other ? 'With ' + esc(t.with_name || 'someone') : 'In the store'}</small></span></button>`; }).join('') || '<p class="muted">No tools added yet. The owner adds them in the app.</p>'}</div></div>
-        <div class="st-group anim" style="--i:2"><h4>Materials for ${stageName(w.stage)} · tap what he takes</h4><div class="tc-grid">${mats.map(m => { const td = w.today.find(x => x.material_id === m.id); const nf = x => +(+x).toFixed(2);
+      const forTrade = t => (t.stages && t.stages.includes(w.stage)) || t.usual === w.id || t.with === w.id;
+      const mine = d.tools.filter(forTrade), others = d.tools.filter(t => !forTrade(t));
+      const tile = t => { const has = t.with === w.id, other = t.with && !has;
+        return `<button class="tc ${has ? 'out' : other ? 'other' : ''}" data-ft="${t.id}"><span class="tc-ic">${has ? '✓' : other ? '•' : '+'}</span><span><b>${esc(t.name)}</b><small>${has ? 'Taken · ' + fmTime(t.since) : other ? 'With ' + esc(t.with_name || 'someone') : 'Tap if he takes it'}</small></span></button>`; };
+      v.innerHTML = head(esc(w.name), `${stageName(w.stage)}${w.job ? ` · on <b>${esc(w.job.ref)}</b>, ${w.job.qty} × ${esc(w.job.item)}` : ''}`, true) + `
+        <div class="in-strip anim">${w.in ? `<span class="in-ok">✓ In today${w.arrived_at ? ' since ' + fmTime(w.arrived_at) : ''}</span><button class="link-sm" id="fmUnarrive">Ticked by mistake? Undo</button>` : `<span>Not in yet</span><button class="btn" id="fmArrive">Tick ${esc(w.name)} in</button>`}</div>
+        <div class="st-group anim" style="--i:1"><h4>${esc(stageName(w.stage))} tools · tick what ${esc(w.name)} takes</h4>
+          <div class="tc-grid">${mine.map(tile).join('') || `<p class="muted">No tools set for ${esc(stageName(w.stage))} yet. The owner sets this in the app (Stock → edit a tool → "Used by").</p>`}</div>
+          ${others.length ? (fm.showAll ? `<h4 style="margin-top:16px">Other tools</h4><div class="tc-grid">${others.map(tile).join('')}</div>` : `<button class="link-sm" id="fmAllTools" style="margin-top:12px">+ Show other tools (${others.length})</button>`) : ''}</div>
+        <div class="st-group anim" style="--i:2"><h4>Materials · tap what he takes</h4><div class="tc-grid">${mats.map(m => { const td = w.today.find(x => x.material_id === m.id); const nf = x => +(+x).toFixed(2);
           return `<div class="mat-tile ${td ? 'has' : ''}"><button class="tc mat" data-fmat="${m.id}"><span class="tc-ic">📦</span><span><b>${esc(m.name)}</b><small>${td ? `<em>${nf(td.qty)} ${esc(m.unit)} taken today${td.times > 1 ? ' (' + td.times + ' times)' : ''}</em>` : ''}${nf(m.in_store)} ${esc(m.unit)} in store</small></span></button>
             ${td && td.last ? `<button class="again" data-again="${m.id}" data-q="${nf(td.last)}">+ ${nf(td.last)} again</button>` : ''}</div>`; }).join('') || '<p class="muted">No materials for this step yet.</p>'}</div></div>
-        ${w.today.length ? `<div class="sw-card today anim" style="--i:3"><p class="k">Taken today by ${esc(w.name)}</p>${w.today.map(x => `<p>${+(+x.qty).toFixed(2)} ${esc(x.unit)} <b>${esc(x.material)}</b></p>`).join('')}</div>` : ''}
+        <button class="giant go anim" id="fmDone" style="--i:3">✓ Done</button>
         ${fm.pick ? qtyPanel(w) : ''}`;
       return;
     }
@@ -141,7 +150,19 @@
       return;
     }
     if (b.id === 'fmCheck'){ await fmLoad(); fm.view = 'check'; fm.miss = new Set(fm.data.tools.filter(t => t.missing).map(t => t.id)); return renderForeman(); }
-    if (b.dataset.fw){ fm.wid = b.dataset.fw; fm.view = 'worker'; fm.pick = null; return renderForeman(); }
+    if (b.dataset.fw){
+      fm.wid = b.dataset.fw; fm.view = 'worker'; fm.pick = null; fm.showAll = false;
+      const w = fmW(fm.wid);
+      if (w && !w.in && !w.away){ const { error } = await db.rpc('ws_foreman_arrive', { p_pin: fm.pin, p_worker: w.id, p_in: true });
+        if (error){ toast(errMsg(error)); } else { toast(`${w.name} is in ✓`); await fmLoad(); } }
+      return renderForeman(); }
+    if (b.id === 'fmArrive' || b.id === 'fmUnarrive'){
+      b.disabled = true; const w = fmW(fm.wid);
+      const { error } = await db.rpc('ws_foreman_arrive', { p_pin: fm.pin, p_worker: fm.wid, p_in: b.id === 'fmArrive' });
+      if (error){ toast(errMsg(error)); b.disabled = false; return; }
+      await fmLoad(); if (b.id === 'fmUnarrive'){ toast(`${w.name} unticked`); fm.view = 'home'; } return renderForeman(); }
+    if (b.id === 'fmAllTools'){ fm.showAll = true; return renderForeman(); }
+    if (b.id === 'fmDone'){ fm.view = 'home'; fm.pick = null; await fmLoad(); return renderForeman(); }
     if (b.dataset.ft){
       b.disabled = true;
       const { data, error } = await db.rpc('ws_foreman_tool', { p_pin: fm.pin, p_tool: b.dataset.ft, p_worker: fm.wid });

@@ -23,6 +23,7 @@
   function workerStatus(w){
     if (!w.active) return ['normal', 'Switched off'];
     if (w.away) return ['normal', 'Away today'];
+    if (!w.here) return ['normal', 'Not in yet'];
     if (!w.task) return ['waiting', 'Waiting for work'];
     const t = T(w.task);
     if (!t) return ['notstarted', 'Not started'];
@@ -65,7 +66,7 @@
     try {
       const since = new Date(Date.now() - 30 * 864e5).toISOString();
       const [w, o, l, wb, mt, mv, sd, tl, tc, tm, ln, hc] = await Promise.all([
-        db.from('ws_workers').select('id,name,stage,active,task_id,locked_until,created_at,away_on,covers').order('name'),
+        db.from('ws_workers').select('id,name,stage,active,task_id,locked_until,created_at,away_on,covers,arrived_on,arrived_at').order('name'),
         db.from('ws_orders').select('*').or('delivered_at.is.null,delivered_at.gt.' + since).order('created_at', { ascending:false }).limit(400),
         db.from('ws_log').select('*').order('id', { ascending:false }).limit(60),
         db.from('orders').select('id,order_no,created_at,status,customer_name,phone,fulfilment,delivery_location,notes,items').in('status', ['received','confirmed','workshop']).order('created_at', { ascending:false }).limit(100),
@@ -83,11 +84,11 @@
       const t = ids.length ? await db.from('ws_tasks').select('*').in('order_id', ids) : { data: [] };
       if (t.error) throw t.error;
       const today = new Date().toLocaleDateString('en-CA', { timeZone:'Africa/Nairobi' });
-      S.workers = w.data.map(x => ({ id:x.id, name:x.name, stage:x.stage, active:x.active, task:x.task_id, covers:x.covers || [], away: !!x.away_on && String(x.away_on).slice(0, 10) === today, locked: x.locked_until && new Date(x.locked_until) > new Date() }));
+      S.workers = w.data.map(x => ({ id:x.id, name:x.name, stage:x.stage, active:x.active, task:x.task_id, covers:x.covers || [], away: !!x.away_on && String(x.away_on).slice(0, 10) === today, arrived: !!x.arrived_on && String(x.arrived_on).slice(0, 10) === today, arrivedAt: x.arrived_at ? new Date(x.arrived_at).getTime() : null, locked: x.locked_until && new Date(x.locked_until) > new Date() })).map(w => Object.assign(w, { here: w.active && w.arrived && !w.away }));
       S.web = wb.error ? [] : wb.data;
       S.mats = mt.error ? [] : mt.data.map(x => ({ id:x.id, name:x.name, unit:x.unit, store:+x.in_store, low:+x.low_at, active:x.active, stages:x.stages || [] }));
       S.moves = mv.error ? [] : mv.data.map(x => ({ id:x.id, at:new Date(x.at).getTime(), mat:x.material_id, kind:x.kind, qty:+x.qty, order:x.order_id, worker:x.worker_id, note:x.note }));
-      S.tools = tl.error ? [] : tl.data.map(x => ({ id:x.id, name:x.name, worker:x.usual_worker, active:x.active }));
+      S.tools = tl.error ? [] : tl.data.map(x => ({ id:x.id, name:x.name, worker:x.usual_worker, active:x.active, stages:x.stages || [] }));
       S.toolChecks = tc.error ? [] : tc.data.map(x => ({ day:String(x.day).slice(0, 10), at:new Date(x.done_at).getTime(), missing:x.missing }));
       S.loans = ln.error ? [] : ln.data.filter(x => !x.back_at).map(x => ({ tool:x.tool_id, worker:x.worker_id, at:new Date(x.out_at).getTime() }));
       S.hasCode = hc.error ? null : !!hc.data;
@@ -137,9 +138,12 @@
     if (S.tools.some(t => t.active) && checkDue() && !S.toolChecks.find(c => c.day === todayStr()))
       items.push({ lvl:'amber', title:'Tool check not done yet tonight', sub:`The foreman should check the tools at ${KT_CONFIG.toolCheckAt || '18:30'} on the workshop screen`, act:`<button class="btn sm line" data-tabgo="stock">See tools</button>` });
     STAGES.forEach(st => { const q = queue(st.id); if (!q.length) return;
-      const can = S.workers.filter(w => w.active && !w.away && (w.stage === st.id || w.covers.includes(st.id)));
+      const can = S.workers.filter(w => w.here && (w.stage === st.id || w.covers.includes(st.id)));
       if (!can.length) items.push({ lvl:'red', title:`Nobody in ${st.name} today`, sub:`${q.length} job${q.length > 1 ? 's' : ''} waiting. Pick someone to step up.`, act:`<button class="btn sm" data-give="${q[0].id}">Give to…</button>` }); });
-    const idle = S.workers.filter(w => w.active && !w.away && !w.task);
+    const nb = new Date(new Date().toLocaleString('en-US', { timeZone:'Africa/Nairobi' }));
+    const notIn = S.workers.filter(w => w.active && !w.arrived && !w.away);
+    if (notIn.length && nb.getHours() >= 9 && nb.getHours() < 18) items.push({ lvl:'amber', title:`${notIn.length} worker${notIn.length > 1 ? 's' : ''} not ticked in yet`, sub:`${notIn.slice(0, 4).map(w => w.name).join(', ')}${notIn.length > 4 ? '…' : ''} · they get no jobs until the foreman ticks them in`, act:`<button class="btn sm line" data-tabgo="workers">See workers</button>` });
+    const idle = S.workers.filter(w => w.here && !w.task);
     if (idle.length) items.push({ lvl:'amber', title: idle.length === 1 ? `${idle[0].name} is waiting for work` : `${idle.slice(0, -1).map(w => w.name).join(', ')} and ${idle[idle.length - 1].name} are waiting for work`,
       sub: idle.length === 1 ? `${stageName(idle[0].stage)} · nothing in the line` : 'Nothing in their lines. Add an order or send a website order.', act:`<button class="btn sm line" data-tabgo="workshop">See workshop</button>` });
     S.orders.filter(o => !o.delivered && o.urgency === 'urgent' && !orderProgress(o).finished && !isLate(o.deadline)).forEach(o => { const c = orderProgress(o).current;
@@ -205,7 +209,7 @@
     const html = `
       <div class="d-head anim" style="--i:0">
         <div><p class="d-date">${now.toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short', year:'numeric' })}</p>
-        <h1>Good ${h < 12 ? 'morning' : h < 17 ? 'afternoon' : 'evening'}</h1>
+        <h1>Good ${h < 12 ? 'morning' : h < 17 ? 'afternoon' : 'evening'} <span class="wave">👋</span></h1>
         <p class="sub" style="margin:0">${att.length ? `Here's what needs your attention today.` : 'Everything is running on its own. ✓'}</p></div>
         <button class="btn d-new" data-neworder><span>+</span> New order</button>
       </div>
@@ -333,14 +337,15 @@
     const row = w => { const [k, l] = workerStatus(w); const t = w.task && T(w.task); const o = t && O(t.order);
       return `<div class="item"><div class="grow"><div class="t">${esc(w.name)} <span class="pill p-${k}">${l}</span></div>
         <div class="s">${stageName(w.stage)}${w.covers.length ? ` · also ${w.covers.map(c => stageName(c).toLowerCase()).join(', ')}` : ''}${o ? ` · on ${o.ref}` : ''}</div></div>
-        ${w.active ? `<button class="btn sm ${w.away ? '' : 'line'} away-btn" data-away="${w.id}" data-v="${w.away ? 0 : 1}">${w.away ? 'Back today' : 'Away today'}</button>` : ''}
+        ${w.active ? (w.here ? `<span class="in-chip">✓ In${w.arrivedAt ? ' ' + new Date(w.arrivedAt).toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' }) : ''}</span><button class="btn sm line away-btn" data-away="${w.id}" data-v="1">Away today</button>`
+          : `<button class="btn sm away-btn" data-away="${w.id}" data-v="0">Mark in</button>${w.away ? '' : `<button class="btn sm line away-btn" data-away="${w.id}" data-v="1">Away</button>`}`) : ''}
         <button class="btn sm line" data-editw="${w.id}">Edit</button></div>`; };
     const away = S.workers.filter(w => w.active && w.away);
     return `
       <div style="display:flex;justify-content:space-between;align-items:end;gap:12px;flex-wrap:wrap"><div><h2>Workers</h2>
       <p class="sub" style="margin-bottom:0">On the workshop screen (Kartech app → Workshop) each worker taps their name to see their job.</p></div>
       <button class="btn" data-addw>+ Add worker</button></div>
-      <div class="fm-card today-card"><span class="fm-ic">📋</span><div class="grow"><b>Today: ${S.workers.filter(w => w.active && !w.away).length} here${away.length ? `, ${away.length} away (${away.map(w => esc(w.name)).join(', ')})` : ''}</b><p>Every morning, tap <b>Away today</b> for anyone who didn't come. Their job goes to someone else and they get no new work today. It resets by itself tomorrow.</p></div></div>
+      <div class="fm-card today-card"><span class="fm-ic">📋</span><div class="grow"><b>Today: ${S.workers.filter(w => w.here).length} in · ${S.workers.filter(w => w.active && !w.arrived && !w.away).length} not in yet${away.length ? ` · ${away.length} away` : ''}</b><p>The foreman ticks each worker in when they arrive (workshop screen → Foreman). Only workers who are in get jobs. You can also tap <b>Mark in</b> or <b>Away</b> here.</p></div></div>
       <div class="fm-card anim"><span class="fm-ic">🔑</span><div class="grow"><b>Foreman code</b><p>${S.hasCode ? 'Set. The foreman uses it on the workshop screen to tick tools and materials.' : 'Not set yet. The foreman needs it to open his page on the workshop screen.'}</p></div><button class="btn ${S.hasCode ? 'line' : ''}" data-fmcode>${S.hasCode ? 'Change code' : 'Set code'}</button></div>
       <div class="fm-card"><span class="fm-ic">🪜</span><div class="grow"><b>Workshop steps</b><p>${STAGES.map(x => esc(x.name)).join(' → ')}</p></div><button class="btn line" data-steps>Edit steps</button></div>
       ${STAGES.map(s => { const ws = S.workers.filter(w => w.stage === s.id); return `<p class="section-title">${s.name}${s.grp !== s.name ? ` <span class="grp-tag">${esc(s.grp)}</span>` : ''}</p>
@@ -385,7 +390,7 @@
     if (e.target.closest('[data-steps]')) return stepsModal();
     const gv = e.target.closest('[data-give]'); if (gv) return giveModal(gv.dataset.give);
     const aw = e.target.closest('[data-away]'); if (aw){ aw.disabled = true; const w = W(aw.dataset.away);
-      return act('ws_set_away', { p_worker: aw.dataset.away, p_away: aw.dataset.v === '1' }, aw.dataset.v === '1' ? `${w ? w.name : 'Worker'} is away today` : `${w ? w.name : 'Worker'} is back`); }
+      return act('ws_set_away', { p_worker: aw.dataset.away, p_away: aw.dataset.v === '1' }, aw.dataset.v === '1' ? `${w ? w.name : 'Worker'} is away today` : `${w ? w.name : 'Worker'} is in`); }
     const et = e.target.closest('[data-edittool]'); if (et) return toolModal(et.dataset.edittool);
     const tf = e.target.closest('[data-toolfound]'); if (tf){ tf.disabled = true; return act('ws_tool_found', { p_tool: tf.dataset.toolfound }, 'Marked as back'); }
     const em = e.target.closest('[data-editmat]'); if (em) return materialModal(em.dataset.editmat);
@@ -539,7 +544,7 @@
     return `<div class="panel anim tools" style="--i:1"><div class="p-head"><h3>🔧 Tools</h3><span class="st-btns">${status}<button class="link" data-addtool>+ Add tool</button></span></div>
       <p class="sub" style="font-size:13px;margin-bottom:6px">The foreman ticks who takes which tool on the workshop screen (Foreman page) and checks them all at ${KT_CONFIG.toolCheckAt || '18:30'}.</p>
       ${S.tools.filter(t => t.active).length ? `<div class="tool-grid">${S.tools.filter(t => t.active).map(t => { const m = miss.find(x => x.tool === t.id); const w = t.worker && W(t.worker);
-        return `<div class="tool ${m ? 'missing' : ''}"><button class="tool-name" data-edittool="${t.id}"><b>${esc(t.name)}</b><small>${w ? 'Normally ' + esc(w.name) : 'Anyone'}</small></button>
+        return `<div class="tool ${m ? 'missing' : ''}"><button class="tool-name" data-edittool="${t.id}"><b>${esc(t.name)}</b><small>${t.stages.length ? t.stages.map(x => esc(stageName(x))).join(', ') : w ? 'Normally ' + esc(w.name) : 'No trade set'}</small></button>
           ${!m && S.loans.find(l => l.tool === t.id) ? (() => { const l = S.loans.find(z => z.tool === t.id), lw = W(l.worker); return `<span class="tool-out">With ${esc(lw ? lw.name : 'someone')}<small>since ${new Date(l.at).toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' })}</small></span>`; })() : ''}
           ${m ? `<span class="tool-st">Missing since ${fmtDay(new Date(m.since + 'T12:00')).replace(/^(Today|Yesterday)$/, x => x.toLowerCase())}</span><button class="btn sm" data-toolfound="${t.id}">It's back</button>` : S.loans.find(l => l.tool === t.id) ? '' : '<span class="tool-ok">✓ In</span>'}</div>`; }).join('')}</div>`
         : '<p class="empty">No tools yet. Add each one with its painted number, e.g. "Grinder 1", "Grinder 2", "Welding machine".</p>'}
@@ -548,7 +553,7 @@
   }
   function giveModal(taskId){
     const t = T(taskId); if (!t) return; const o = O(t.order);
-    const here = S.workers.filter(w => w.active && !w.away);
+    const here = S.workers.filter(w => w.here);
     const fits = here.filter(w => w.stage === t.stage || w.covers.includes(t.stage));
     const others = here.filter(w => !fits.includes(w));
     const btn = w => { const wt = w.task && T(w.task), wo = wt && O(wt.order); const mine = t.worker === w.id;
@@ -611,10 +616,11 @@
     const t = id ? TL(id) : null;
     const s = openModal(`<h2>${t ? 'Edit ' + esc(t.name) : 'Add a tool'}</h2>
       <label class="field"><span>Name (use the number painted on it)</span><input id="tName" value="${t ? esc(t.name) : ''}" placeholder="e.g. Grinder 1" autocomplete="off"></label>
-      <label class="field"><span>Who normally uses it</span><select id="tWho"><option value="">Anyone</option>${S.workers.filter(w => w.active).map(w => `<option value="${w.id}" ${t && t.worker === w.id ? 'selected' : ''}>${esc(w.name)} · ${stageName(w.stage)}</option>`).join('')}</select></label>
+      <div class="field"><span>Used by which trades (the foreman sees it when he taps these workers)</span>${stepChecks(t ? t.stages : [], 'tStage')}</div>
+      <label class="field"><span>Who normally uses it (optional)</span><select id="tWho"><option value="">Anyone</option>${S.workers.filter(w => w.active).map(w => `<option value="${w.id}" ${t && t.worker === w.id ? 'selected' : ''}>${esc(w.name)} · ${stageName(w.stage)}</option>`).join('')}</select></label>
       <p id="tErr" class="ferr"></p>
       <div class="actions" style="justify-content:space-between">${t ? '<button class="btn line" id="tOff" style="color:var(--c-late)">Remove tool</button>' : '<span></span>'}<span style="display:flex;gap:8px"><button class="btn line" data-x>Cancel</button><button class="btn" id="tSave">Save</button></span></div>`);
-    const save = async extra => { const { error } = await db.rpc('ws_save_tool', { p: Object.assign({ id: t ? t.id : null, name: s.querySelector('#tName').value, usual_worker: s.querySelector('#tWho').value }, extra || {}) });
+    const save = async extra => { const { error } = await db.rpc('ws_save_tool', { p: Object.assign({ id: t ? t.id : null, name: s.querySelector('#tName').value, usual_worker: s.querySelector('#tWho').value, stages: [...s.querySelectorAll('.tStage:checked')].map(x => x.value) }, extra || {}) });
       if (error){ s.querySelector('#tErr').textContent = errMsg(error); return; } closeModal(); toast('Saved'); await load(); };
     s.querySelector('#tSave').onclick = () => save();
     const off = s.querySelector('#tOff'); if (off) off.onclick = () => save({ active:false });

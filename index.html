@@ -3,73 +3,129 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Kartech Workshop</title>
-<meta name="robots" content="noindex, nofollow">
+<title>Kartech</title>
+<meta name="description" content="Kartech Engineering: shop and track your order, run the workshop, manage the business.">
 <meta name="theme-color" content="#1F3A2A">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
-<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Kartech">
+<script>
+  // Opened before? Go straight to that side (unless they asked to choose again).
+  (function(){ try {
+    var p = new URLSearchParams(location.search), r = localStorage.getItem('kt-role');
+    if (p.has('choose')) { localStorage.removeItem('kt-role'); return; }
+    var go = { owner:'owner.html', workshop:'station.html', customer:'https://sh3wins.github.io/kartech-website/' }[r];
+    if (go) location.replace(go);
+  } catch(e){} })();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/app.css?v=5">
-<link rel="stylesheet" href="css/dash.css?v=6">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{ --forest:#1F3A2A; --forest2:#132619; --leaf:#2E6B45; --gold:#C9A24A; --paper:#F4F3EE; --ease:cubic-bezier(.2,.8,.2,1); }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{min-height:100%;background:var(--forest2);color:#fff;font-family:'Inter',sans-serif}
+  button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+  .wrap{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 18px calc(28px + env(safe-area-inset-bottom,0px));
+    background:radial-gradient(1200px 600px at 15% -10%, #2D5A3E 0, transparent 60%), radial-gradient(900px 500px at 110% 110%, #24462F 0, transparent 55%), var(--forest2)}
+  .brand{display:flex;flex-direction:column;align-items:center;text-align:center;animation:rise .7s var(--ease) both}
+  .mark{width:78px;height:78px;border-radius:22px;background:var(--forest);display:flex;align-items:center;justify-content:center;box-shadow:0 18px 40px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.08);position:relative}
+  .mark svg{width:44px;height:44px}
+  .mark::after{content:"";position:absolute;bottom:12px;width:22px;height:3px;background:var(--gold);border-radius:2px}
+  .name{font-family:'Archivo',sans-serif;font-weight:800;letter-spacing:.14em;font-size:22px;margin-top:18px}
+  .name small{display:block;font-family:'Inter';font-weight:500;font-size:11px;letter-spacing:.38em;opacity:.6;margin-top:6px}
+  h1{font-family:'Archivo',sans-serif;font-size:clamp(28px,6vw,40px);line-height:1.1;margin:34px 0 8px;text-align:center;animation:rise .7s .08s var(--ease) both}
+  .lead{color:#BFD0C4;text-align:center;max-width:420px;animation:rise .7s .14s var(--ease) both}
+  .roles{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;width:100%;max-width:980px;margin-top:34px}
+  .role{position:relative;text-align:left;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:20px;padding:22px 22px 20px;overflow:hidden;
+    transition:transform .3s var(--ease),background .3s,border-color .3s;animation:rise .7s var(--ease) both}
+  .role:nth-child(1){animation-delay:.2s}.role:nth-child(2){animation-delay:.28s}.role:nth-child(3){animation-delay:.36s}
+  .role:hover{transform:translateY(-4px);background:rgba(255,255,255,.1);border-color:rgba(143,211,167,.5)}
+  .role:active{transform:scale(.98)}
+  .role .ic{width:52px;height:52px;border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:26px;margin-bottom:16px;background:rgba(255,255,255,.1)}
+  .role.customer .ic{background:var(--gold)}
+  .role.workshop .ic{background:var(--leaf)}
+  .role.owner .ic{background:#fff}
+  .role b{display:block;font-family:'Archivo',sans-serif;font-size:21px;margin-bottom:4px}
+  .role p{color:#BFD0C4;font-size:14px;line-height:1.45}
+  .role .go{display:inline-flex;align-items:center;gap:6px;margin-top:16px;font-weight:600;font-size:14px;color:#8FD3A7;transition:gap .25s var(--ease)}
+  .role:hover .go{gap:10px}
+  .role::after{content:"";position:absolute;right:-40px;top:-40px;width:140px;height:140px;border-radius:50%;background:rgba(255,255,255,.04);transition:transform .5s var(--ease)}
+  .role:hover::after{transform:scale(1.4)}
+  .foot{margin-top:28px;display:flex;flex-direction:column;align-items:center;gap:10px;animation:rise .7s .45s var(--ease) both}
+  .remember{display:flex;align-items:center;gap:8px;color:#BFD0C4;font-size:13.5px}
+  .remember input{width:18px;height:18px;accent-color:#8FD3A7}
+  .install{display:none;background:#fff;color:var(--forest);font-weight:700;border-radius:12px;padding:12px 18px}
+  .install.show{display:inline-flex}
+  .hint{color:#8EA596;font-size:12.5px;text-align:center;max-width:460px}
+  @keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+  @media (max-width:760px){
+    .roles{grid-template-columns:1fr;gap:12px;margin-top:26px}
+    .role{display:grid;grid-template-columns:52px 1fr;column-gap:16px;padding:18px}
+    .role .ic{margin:0;grid-row:span 3}
+    .role b{font-size:19px}
+    .role .go{margin-top:8px}
+    h1{margin-top:26px}
+  }
+  @media (prefers-reduced-motion: reduce){ *{animation:none!important;transition:none!important} }
+</style>
 </head>
-<body class="dash">
-
-<!-- left menu (computer) / bottom menu (phone) -->
-<aside class="side hidden" id="side">
-  <div class="logo"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M6 4h8v13L26 4h10L22 19l15 17H26L14 22v14H6z" fill="currentColor"/></svg><span>KARTECH<small>ENGINEERING</small></span></div>
-  <nav class="tabs">
-    <button data-tab="today" class="on"><svg viewBox="0 0 24 24"><path d="M3 3h8v8H3zM13 3h8v5h-8zM13 10h8v11h-8zM3 13h8v8H3z"/></svg><span>Dashboard</span> <span class="badge" id="attnBadge"></span></button>
-    <button data-tab="orders"><svg viewBox="0 0 24 24"><path d="M5 3h14v18H5zM8 7h8M8 11h8M8 15h5"/></svg><span>Orders</span></button>
-    <button data-tab="workshop"><svg viewBox="0 0 24 24"><path d="M3 21V9l6 4V9l6 4V5h6v16z"/></svg><span>Workshop</span></button>
-    <button data-tab="stock"><svg viewBox="0 0 24 24"><path d="M3 8l9-5 9 5v10l-9 5-9-5zM3 8l9 5 9-5M12 13v10"/></svg><span>Stock</span></button>
-    <button data-tab="workers"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3-6 7-6s7 2 7 6M17 11a3 3 0 1 0 0-6M22 21c0-3-2-5-5-5"/></svg><span>Workers</span></button>
-  </nav>
-  <div class="side-foot">
-    <button class="side-set" id="sideSet"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg><span>Voice &amp; settings</span></button>
-    <div class="me"><span class="me-av">O</span><span><b>Owner</b><small id="who"></small></span></div>
+<body>
+<main class="wrap">
+  <div class="brand">
+    <div class="mark"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M6 4h8v13L26 4h10L22 19l15 17H26L14 22v14H6z" fill="#fff"/></svg></div>
+    <div class="name">KARTECH<small>ENGINEERING</small></div>
   </div>
-</aside>
+  <h1>Welcome to Kartech</h1>
+  <p class="lead">Who are you? Choose once. Next time the app opens straight to your side.</p>
 
-<!-- phone top bar -->
-<header class="mbar hidden" id="mbar">
-  <div class="logo"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M6 4h8v13L26 4h10L22 19l15 17H26L14 22v14H6z" fill="currentColor"/></svg><span>Kartech</span></div>
-  <span class="live hidden" id="live"><i></i> Live</span>
-  <button class="mset" id="mSet" aria-label="Voice and settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg></button>
-</header>
+  <div class="roles">
+    <button class="role customer" data-role="customer">
+      <span class="ic">🛋️</span>
+      <b>Customer</b>
+      <p>Browse furniture, benches and gas cookers. Order, and track your order live from the workshop.</p>
+      <span class="go">Shop &amp; track →</span>
+    </button>
+    <button class="role workshop" data-role="workshop">
+      <span class="ic">🔧</span>
+      <b>Workshop</b>
+      <p>For the workshop computer or tablet. Workers tap their name to see their job. The foreman ticks tools and materials.</p>
+      <span class="go">Open workshop screen →</span>
+    </button>
+    <button class="role owner" data-role="owner">
+      <span class="ic">👩‍💼</span>
+      <b>Owner</b>
+      <p>Orders, workers, stock and tools. Alarms and voice alerts. Sign in once with your email.</p>
+      <span class="go">Go to dashboard →</span>
+    </button>
+  </div>
 
-<!-- sign in (only once on each phone) -->
-<section class="login hidden" id="loginView">
-  <form class="box" id="loginForm">
-    <div class="logo dark"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M6 4h8v13L26 4h10L22 19l15 17H26L14 22v14H6z" fill="currentColor"/></svg><span>KARTECH<small>ENGINEERING</small></span></div>
-    <h1>Owner sign in</h1>
-    <p class="sub">You only do this once. After this the app opens straight away.</p>
-    <label class="field"><span>Email</span><input id="lEmail" type="email" autocomplete="username" required></label>
-    <label class="field"><span>Password</span><input id="lPass" type="password" autocomplete="current-password" required></label>
-    <p id="lErr" style="color:var(--red);min-height:20px;font-size:13px"></p>
-    <button class="btn" id="lBtn">Sign in</button>
-    <p class="sub" style="margin:16px 0 0;font-size:13px">Workshop computer? Open <a href="station.html">station.html</a> instead.</p>
-  </form>
-</section>
-
-<section class="login hidden" id="setupView"><div class="box"><h1>Not set up yet</h1><p class="sub">Add the Supabase keys in js/config.js.</p></div></section>
-
-<main id="owner" class="owner hidden">
-  <section id="view"><p class="empty">Loading…</p></section>
+  <div class="foot">
+    <label class="remember"><input type="checkbox" id="remember" checked> Remember my choice on this device</label>
+    <button class="install" id="install">⬇ Install the Kartech app</button>
+    <p class="hint" id="hint">To switch later: Owner → Voice &amp; settings → Switch. Workshop → Switch (bottom left).</p>
+  </div>
 </main>
-<button class="fab hidden" id="fab" aria-label="New order">+</button>
-<button class="hidden" id="newOrderBtn"></button>
-<button class="hidden" id="outBtn"></button>
-
-<div class="toast" id="toast"></div>
-<div class="alarm hidden" id="alarm"></div>
-
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="js/config.js?v=3"></script>
-<script src="js/owner.js?v=10"></script>
-<script>if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(()=>{});</script>
+<script>
+  var GO = { owner:'owner.html', workshop:'station.html', customer:'https://sh3wins.github.io/kartech-website/' };
+  document.querySelectorAll('[data-role]').forEach(function(b){
+    b.addEventListener('click', function(){
+      var r = b.dataset.role;
+      try { if (document.getElementById('remember').checked) localStorage.setItem('kt-role', r); else localStorage.removeItem('kt-role'); } catch(e){}
+      location.href = GO[r];
+    });
+  });
+  // "Install the app" button (Android Chrome / Edge / desktop)
+  var deferred = null, ib = document.getElementById('install');
+  window.addEventListener('beforeinstallprompt', function(e){ e.preventDefault(); deferred = e; ib.classList.add('show'); });
+  ib.addEventListener('click', function(){ if (!deferred) return; deferred.prompt(); deferred.userChoice.finally(function(){ deferred = null; ib.classList.remove('show'); }); });
+  window.addEventListener('appinstalled', function(){ ib.classList.remove('show'); });
+  if (/iphone|ipad/i.test(navigator.userAgent) && !navigator.standalone)
+    document.getElementById('hint').innerHTML = 'On iPhone: tap Share, then <b>Add to Home Screen</b> to install the app.';
+  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(function(){});
+</script>
 </body>
 </html>
