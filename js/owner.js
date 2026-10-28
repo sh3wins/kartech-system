@@ -87,7 +87,7 @@
       const today = new Date().toLocaleDateString('en-CA', { timeZone:'Africa/Nairobi' });
       S.workers = w.data.map(x => ({ id:x.id, name:x.name, stage:x.stage, active:x.active, task:x.task_id, covers:x.covers || [], away: !!x.away_on && String(x.away_on).slice(0, 10) === today, arrived: !!x.arrived_on && String(x.arrived_on).slice(0, 10) === today, arrivedAt: x.arrived_at ? new Date(x.arrived_at).getTime() : null, locked: x.locked_until && new Date(x.locked_until) > new Date() })).map(w => Object.assign(w, { here: w.active && w.arrived && !w.away }));
       S.web = wb.error ? [] : wb.data;
-      S.mats = mt.error ? [] : mt.data.map(x => ({ id:x.id, name:x.name, unit:x.unit, store:+x.in_store, low:+x.low_at, active:x.active, stages:x.stages || [] }));
+      S.mats = mt.error ? [] : mt.data.map(x => ({ id:x.id, name:x.name, unit:x.unit, store:+x.in_store, low:+x.low_at, counted: x.counted !== false, active:x.active, stages:x.stages || [] }));
       S.moves = mv.error ? [] : mv.data.map(x => ({ id:x.id, at:new Date(x.at).getTime(), mat:x.material_id, kind:x.kind, qty:+x.qty, order:x.order_id, worker:x.worker_id, note:x.note }));
       S.tools = tl.error ? [] : tl.data.map(x => ({ id:x.id, name:x.name, worker:x.usual_worker, active:x.active, stages:x.stages || [] }));
       S.toolChecks = tc.error ? [] : tc.data.map(x => ({ day:String(x.day).slice(0, 10), at:new Date(x.done_at).getTime(), missing:x.missing }));
@@ -96,7 +96,7 @@
       S.toolMissing = tm.error ? [] : tm.data.map(x => ({ tool:x.tool_id, worker:x.worker_id, since:String(x.since).slice(0, 10), found: !!x.found_at }));
       S.std = sd.error ? [] : sd.data.map(x => ({ product:x.product, mat:x.material_id, per:+x.per_piece }));
       S.orders = o.data.map(x => ({ id:x.id, ref:x.ref, src:x.source_order_id || null, srcNo:x.source_no || null, customer:x.customer, item:x.item, qty:x.qty, deadline:new Date(x.deadline + 'T17:00'), dl:String(x.deadline).slice(0, 10), urgency:x.urgency, notes:x.notes, stages:x.stages, delivered: !!x.delivered_at }));
-      S.tasks = t.data.map(x => ({ id:x.id, order:x.order_id, step:x.step, stage:x.stage, status:x.status, worker:x.worker_id, rank:x.rank, planned: Array.isArray(x.planned) ? x.planned : String(x.planned || '').replace(/[{}]/g, '').split(',').filter(Boolean),
+      S.tasks = t.data.map(x => ({ id:x.id, order:x.order_id, step:x.step, stage:x.stage, status:x.status, worker:x.worker_id, rank:x.rank, withPrev: !!x.with_prev, planned: Array.isArray(x.planned) ? x.planned : String(x.planned || '').replace(/[{}]/g, '').split(',').filter(Boolean),
         problem: x.problem_at ? { reason:x.problem_reason, at:new Date(x.problem_at).getTime(), stopped:!!x.problem_stopped, ack: !!x.problem_ack_at } : null }));
       S.log = l.data.map(x => ({ id:x.id, text:x.text, kind:x.kind, at:new Date(x.at).getTime(), order:x.order_id }));
       loaded = true;
@@ -477,6 +477,7 @@
     if (e.target.closest('[data-fmcode]')) return fmCodeModal();
     if (e.target.closest('[data-steps]')) return stepsModal();
     const gv = e.target.closest('[data-give]'); if (gv) return giveModal(gv.dataset.give);
+    const pl = e.target.closest('[data-plan]'); if (pl) return planModal(pl.dataset.plan);
     const aw = e.target.closest('[data-away]'); if (aw){ aw.disabled = true; const w = W(aw.dataset.away);
       return act('ws_set_away', { p_worker: aw.dataset.away, p_away: aw.dataset.v === '1' }, aw.dataset.v === '1' ? `${w ? w.name : 'Worker'} is away today` : `${w ? w.name : 'Worker'} is in`); }
     const et = e.target.closest('[data-edittool]'); if (et) return toolModal(et.dataset.edittool);
@@ -500,10 +501,37 @@
   function openModal(html){ closeModal(); const s = document.createElement('div'); s.className = 'scrim'; s.innerHTML = `<div class="modal">${html}</div>`; s.addEventListener('click', e => { if (e.target === s || e.target.closest('[data-x]')) closeModal(); }); document.body.appendChild(s); return s; }
 
 
+  /* ---------- pick who does one step (any time, even before it's ready) ---------- */
+  function planModal(taskId){
+    const t = T(taskId), o = t && O(t.order); if (!o) return;
+    const st = t.stage;
+    const state = w => { if (w.away) return 'away'; if (!w.here) return 'not in'; const x = w.task && T(w.task), xo = x && O(x.order); return xo ? 'on ' + xo.ref : 'free'; };
+    const mine = S.workers.filter(w => w.active && (w.stage === st || (w.covers || []).includes(st))).sort((a, b) => (b.stage === st) - (a.stage === st) || a.name.localeCompare(b.name));
+    const rest = S.workers.filter(w => w.active && !mine.includes(w)).sort((a, b) => a.name.localeCompare(b.name));
+    const chip = w => `<button type="button" class="sp-w ${t.planned.includes(w.id) ? 'pk' : ''}" data-w="${w.id}"><b>${esc(w.name)}</b><small>${w.stage !== st ? esc(stageName(w.stage)) + ' · ' : ''}${state(w)}</small></button>`;
+    const s = openModal(`
+      <h2>${esc(o.ref)} · ${esc(stageName(st))}</h2>
+      <p class="sub" style="margin-top:-6px">Who does this step? Tap 1 or 2 people. When the step is ready it goes straight to them.</p>
+      <div class="sp-who pm">${mine.map(chip).join('') || '<span class="sp-any">No one does this step yet</span>'}</div>
+      ${rest.length ? `<details class="pm-more"><summary>Someone from another step</summary><div class="sp-who pm">${rest.map(chip).join('')}</div></details>` : ''}
+      <p class="hint-sm" id="pmHint">${t.planned.length ? '' : 'Nobody picked = whoever is free.'}</p>
+      <p id="pmErr" style="color:var(--red);min-height:20px;font-size:13px"></p>
+      <div class="actions"><button class="btn line" data-x>Cancel</button><button class="btn" id="pmSave">Save</button></div>`);
+    s.addEventListener('click', e => { const b = e.target.closest('.sp-w'); if (!b) return;
+      if (!b.classList.contains('pk')){ const pk = [...s.querySelectorAll('.sp-w.pk')]; if (pk.length >= 2) pk[0].classList.remove('pk'); }
+      b.classList.toggle('pk'); s.querySelector('#pmHint').textContent = s.querySelector('.sp-w.pk') ? '' : 'Nobody picked = whoever is free.'; });
+    s.querySelector('#pmSave').onclick = async () => { const btn = s.querySelector('#pmSave'); btn.disabled = true; btn.textContent = 'Saving…';
+      const ids = [...s.querySelectorAll('.sp-w.pk')].map(b => b.dataset.w);
+      const { error } = await db.rpc('ws_plan_step', { p_task: t.id, p_people: ids });
+      if (error){ btn.disabled = false; btn.textContent = 'Save'; s.querySelector('#pmErr').textContent = /ws_plan_step/.test(errMsg(error)) ? 'Run update-11-together.sql in Supabase first.' : errMsg(error); return; }
+      const names = ids.map(id => W(id)?.name).filter(Boolean).join(' & ');
+      closeModal(); toast(names ? `${stageName(st)} on ${o.ref}: ${names}` : `${stageName(st)} on ${o.ref}: anyone free`); await load(); orderModal(o.id); };
+  }
+
   /* ---------- steps + who does each one (new order / edit) ---------- */
   // stages: ticked steps (true = all) · people: {stage:[ids]} · lock: {stage:'done'|'started'}
-  function stepPeople(stages, people, lock){
-    people = people || {}; lock = lock || {};
+  function stepPeople(stages, people, lock, together){
+    people = people || {}; lock = lock || {}; together = together || [];
     const can = st => S.workers.filter(w => w.active && (w.stage === st || (w.covers || []).includes(st)))
       .sort((a, b) => (b.stage === st) - (a.stage === st) || a.name.localeCompare(b.name));
     const state = w => { if (w.away) return 'away'; if (!w.here) return 'not in'; const t = w.task && T(w.task), o = t && O(t.order); return o ? 'on ' + o.ref : 'free'; };
@@ -513,23 +541,27 @@
         <label class="sp-step"><input type="checkbox" class="spStage" value="${st.id}" ${on ? 'checked' : ''} ${l ? 'disabled' : ''}><span>${esc(st.name)}</span>${l ? `<small>${l === 'done' ? '✓ done' : 'in progress'}</small>` : ''}</label>
         <div class="sp-who">${l === 'done' ? '' : ws.length ? ws.map(w => `<button type="button" class="sp-w ${picked.includes(w.id) ? 'pk' : ''}" data-w="${w.id}"><b>${esc(w.name)}</b><small>${w.stage !== st.id ? 'can cover · ' : ''}${state(w)}</small></button>`).join('')
           + `<span class="sp-any">${picked.length ? '' : 'Anyone free'}</span>` : '<span class="sp-any">No workers for this step yet</span>'}</div>
+        <label class="sp-tog"><input type="checkbox" class="spTog" ${together.includes(st.id) ? 'checked' : ''} ${l ? 'disabled' : ''}> ⇉ Same time as the step above</label>
       </div>`; }).join('')}`).join('')}
-      <p class="hint-sm">Tick the steps. Under each one, tap who does it, 1 or 2 people. Nobody picked = whoever is free.</p></div>`;
+      <p class="hint-sm">Tick the steps. Under each one, tap who does it, 1 or 2 people. Nobody picked = whoever is free. Tick <b>⇉ Same time</b> when a step can start together with the one above it.</p></div>`;
   }
+  function spFirst(root){ const rows = [...root.querySelectorAll('.sp-row')]; const f = rows.find(r => r.querySelector('.spStage').checked); rows.forEach(r => r.classList.toggle('first', r === f)); }
   function bindStepPeople(root){
-    root.addEventListener('change', e => { const c = e.target.closest('.spStage'); if (!c) return; c.closest('.sp-row').classList.toggle('on', c.checked); });
+    spFirst(root);
+    root.addEventListener('change', e => { const c = e.target.closest('.spStage'); if (!c) return; c.closest('.sp-row').classList.toggle('on', c.checked); spFirst(root); });
     root.addEventListener('click', e => { const b = e.target.closest('.sp-w'); if (!b) return;
       const row = b.closest('.sp-row'); const box = row.querySelector('.spStage');
-      if (!box.checked && !box.disabled){ box.checked = true; row.classList.add('on'); }
+      if (!box.checked && !box.disabled){ box.checked = true; row.classList.add('on'); spFirst(root); }
       if (!b.classList.contains('pk')){ const pk = [...row.querySelectorAll('.sp-w.pk')]; if (pk.length >= 2) pk[0].classList.remove('pk'); }
       b.classList.toggle('pk');
       const any = row.querySelector('.sp-any'); if (any) any.textContent = row.querySelector('.sp-w.pk') ? '' : 'Anyone free'; });
   }
   function readStepPeople(root){
-    const stages = [], people = {};
+    const stages = [], people = {}, together = [];
     root.querySelectorAll('.sp-row').forEach(r => { const box = r.querySelector('.spStage'); if (!box.checked) return;
-      stages.push(box.value); people[box.value] = [...r.querySelectorAll('.sp-w.pk')].map(b => b.dataset.w); });
-    return { stages, people };
+      stages.push(box.value); people[box.value] = [...r.querySelectorAll('.sp-w.pk')].map(b => b.dataset.w);
+      if (stages.length > 1 && r.querySelector('.spTog').checked) together.push(box.value); });
+    return { stages, people, together };
   }
 
   function newOrderModal(){
@@ -554,11 +586,11 @@
     s.querySelector('#fSave').onclick = async () => {
       const customer = s.querySelector('#fCust').value.trim(), item = s.querySelector('#fItem').value.trim();
       const qty = parseInt(s.querySelector('#fQty').value, 10) || 0;
-      const { stages, people } = readStepPeople(s);
+      const { stages, people, together } = readStepPeople(s);
       if (!customer || !item || qty < 1) return s.querySelector('#fErr').textContent = 'Fill in the customer, what, and how many.';
       if (!stages.length) return s.querySelector('#fErr').textContent = 'Pick at least one step.';
       const btn = s.querySelector('#fSave'); btn.disabled = true; btn.textContent = 'Adding…';
-      const { data, error } = await db.rpc('ws_create_order', { p: { customer, item, qty, deadline: s.querySelector('#fDate').value || null, urgency: urg, stages, people, notes: s.querySelector('#fNote').value.trim() } });
+      const { data, error } = await db.rpc('ws_create_order', { p: { customer, item, qty, deadline: s.querySelector('#fDate').value || null, urgency: urg, stages, people, together, notes: s.querySelector('#fNote').value.trim() } });
       if (error){ btn.disabled = false; btn.textContent = 'Add to workshop'; s.querySelector('#fErr').textContent = errMsg(error); return; }
       closeModal(); tab = 'orders'; await load();
       const o = S.orders.find(x => x.ref === data); const t = o && S.tasks.find(x => x.order === o.id && x.worker);
@@ -587,7 +619,7 @@
       <label class="field"><span>Note for the workshop</span><textarea id="eNote" rows="2">${esc(o.notes || '')}</textarea></label>
       <div class="field"><span>How urgent</span><div class="seg-pick" id="eUrg">
         ${['normal','high','urgent'].map(u => `<button type="button" data-u="${u}" class="${o.urgency === u ? 'on' : ''}">${URG_NAME[u]}</button>`).join('')}</div></div>
-      <div class="field"><span>Steps and who does them</span>${stepPeople(o.stages, Object.fromEntries(ts.map(t => [t.stage, t.planned])), lock)}
+      <div class="field"><span>Steps and who does them</span>${stepPeople(o.stages, Object.fromEntries(ts.map(t => [t.stage, t.planned])), lock, ts.filter(t => t.withPrev).map(t => t.stage))}
         ${Object.keys(lock).length ? '<p class="hint-sm">Steps already done or being worked on can\'t be removed.</p>' : ''}</div>
       <p id="eErr" style="color:var(--red);min-height:20px;font-size:13px"></p>
       <div class="actions" style="justify-content:space-between">
@@ -599,11 +631,11 @@
     s.querySelector('#eSave').onclick = async () => {
       const customer = s.querySelector('#eCust').value.trim(), item = s.querySelector('#eItem').value.trim();
       const qty = parseInt(s.querySelector('#eQty').value, 10) || 0;
-      const { stages, people } = readStepPeople(s);
+      const { stages, people, together } = readStepPeople(s);
       if (!customer || !item || qty < 1) return s.querySelector('#eErr').textContent = 'Fill in the customer, what, and how many.';
       if (!stages.length) return s.querySelector('#eErr').textContent = 'Pick at least one step.';
       const btn = s.querySelector('#eSave'); btn.disabled = true; btn.textContent = 'Saving…';
-      const { error } = await db.rpc('ws_edit_order', { p: { id: o.id, customer, item, qty, deadline: s.querySelector('#eDate').value || null, urgency: urg, stages, people, notes: s.querySelector('#eNote').value.trim() } });
+      const { error } = await db.rpc('ws_edit_order', { p: { id: o.id, customer, item, qty, deadline: s.querySelector('#eDate').value || null, urgency: urg, stages, people, together, notes: s.querySelector('#eNote').value.trim() } });
       if (error){ btn.disabled = false; btn.textContent = 'Save changes'; s.querySelector('#eErr').textContent = /ws_edit_order/.test(errMsg(error)) ? 'Run update-9-edit-orders.sql in Supabase first.' : errMsg(error); return; }
       closeModal(); toast(`${o.ref} updated`); await load(); orderModal(o.id);
     };
@@ -666,7 +698,7 @@
       ${(() => { const use = orderUse(o); return use.length ? `<p class="section-title">Materials</p><div class="steps">${use.map(r => { const m = M(r.mat);
         return `<div class="step"><div style="flex:1"><b>${esc(m.name)}</b><div style="color:var(--muted);font-size:13px">Given ${n2(r.given)} ${esc(m.unit)}${r.normal != null ? ` · normal ${n2(r.normal)} ${esc(m.unit)}` : ''}</div></div>${r.over ? '<span class="pill p-attention">More than normal</span>' : r.normal != null ? '<span class="pill p-working">OK</span>' : ''}</div>`; }).join('')}</div>` : ''; })()}
       <p class="section-title">Steps</p>
-      <div class="steps">${ts.map(t => { const [k, l] = lbl(t); const w = t.worker && W(t.worker); const plan = t.planned.map(id => W(id)?.name).filter(Boolean).join(' & '); return `<div class="step"><div style="flex:1"><b>${stageName(t.stage)}</b><div style="color:var(--muted);font-size:13px">${w ? esc(taskNames(t)) + (x => x ? ` · ${esc(x)} joins when free` : '')(t.planned.filter(id => !S.workers.some(v => v.id === id && v.task === t.id)).map(id => W(id)?.name).filter(Boolean).join(' & ')) : plan ? '👤 For ' + esc(plan) : 'Whoever is free'}${t.problem ? ` · ⚠ ${esc(t.problem.reason)}` : ''}</div></div><span class="pill p-${k}">${l}</span>${t.problem ? `<button class="btn sm" data-solve="${t.id}">Solved</button>` : ''}${['queued','assigned','working'].includes(t.status) && !o.delivered ? `<button class="btn sm line" data-give="${t.id}">${t.worker ? 'Change' : 'Give to…'}</button>` : ''}</div>`; }).join('')}</div>
+      <div class="steps">${ts.map(t => { const [k, l] = lbl(t); const w = t.worker && W(t.worker); const plan = t.planned.map(id => W(id)?.name).filter(Boolean).join(' & '); return `<div class="step"><div style="flex:1"><b>${stageName(t.stage)}</b>${t.withPrev ? ' <span class="tog-tag">⇉ same time as above</span>' : ''}<div style="color:var(--muted);font-size:13px">${w ? esc(taskNames(t)) + (x => x ? ` · ${esc(x)} joins when free` : '')(t.planned.filter(id => !S.workers.some(v => v.id === id && v.task === t.id)).map(id => W(id)?.name).filter(Boolean).join(' & ')) : plan ? '👤 For ' + esc(plan) : 'Whoever is free'}${t.problem ? ` · ⚠ ${esc(t.problem.reason)}` : ''}</div></div><span class="pill p-${k}">${l}</span>${t.problem ? `<button class="btn sm" data-solve="${t.id}">Solved</button>` : ''}${o.delivered || t.status === 'done' ? '' : t.worker ? `<button class="btn sm line" data-give="${t.id}">Change</button>` : `<button class="btn sm line" data-plan="${t.id}">👤 ${t.planned.length ? 'Change' : 'Pick'}</button>`}</div>`; }).join('')}</div>
       ${!o.delivered && o.urgency !== 'urgent' && !p.finished ? `<p style="margin-top:14px;font-size:13px;color:var(--muted)">Customer pushing? Make it urgent and it jumps to the front of every line. No one's current job gets interrupted.</p>` : ''}
       <div class="actions">
         ${!o.delivered && o.urgency !== 'urgent' && !p.finished ? `<button class="btn red" id="mkUrgent">Make urgent</button>` : ''}
@@ -818,13 +850,16 @@
         ${watch.map(a => `<div class="need red"${a.order ? ` data-open="${a.order}"` : ''}><span class="need-dot"></span><div class="grow"><b>${esc(a.title)}</b><p>${esc(a.sub)}</p></div></div>`).join('')}</div>` : ''}
       ${toolsPanel()}
       <p class="section-title anim" style="--i:2">Materials</p>
-      ${mats.length ? `<div class="mats">${mats.map((m, i) => { const low = m.low > 0 && m.store <= m.low; const full = Math.max(m.low * 3, m.store, 1);
-        return `<div class="mat anim ${low ? 'low' : ''}" style="--i:${i + 2}">
+      ${mats.length ? `<div class="mats">${mats.map((m, i) => { const low = m.counted && m.low > 0 && m.store <= m.low; const full = Math.max(m.low * 3, m.store, 1);
+        const t0 = new Date(todayStr() + 'T00:00:00+03:00').getTime(); const used = -S.moves.filter(x => x.mat === m.id && x.at >= t0 && (x.kind === 'out' || x.kind === 'back')).reduce((a, x) => a + x.qty, 0) || 0;
+        return `<div class="mat anim ${low ? 'low' : ''} ${m.counted ? '' : 'nc'}" style="--i:${i + 2}">
           <button class="mat-name" data-editmat="${m.id}"><b>${esc(m.name)}</b>${low ? '<span class="hp h-late">Low</span>' : ''}</button>
-          <p class="mat-qty"><b>${n2(m.store)}</b> ${esc(m.unit)}</p>
+          ${m.counted ? `<p class="mat-qty"><b>${n2(m.store)}</b> ${esc(m.unit)}</p>
           <div class="mat-bar"><i style="width:${Math.min(100, 100 * m.store / full)}%"></i>${m.low > 0 ? `<em style="left:${100 * m.low / full}%"></em>` : ''}</div>
-          <p class="mat-low">${m.low > 0 ? `Warns at ${n2(m.low)} ${esc(m.unit)}` : 'No low-stock warning set'}</p>
-          <div class="mat-acts"><button data-move="in" data-mat="${m.id}">＋ Received</button><button data-move="out" data-mat="${m.id}">Give out</button><button data-move="back" data-mat="${m.id}">Returned</button><button data-cnt="${m.id}">Count</button></div>
+          <p class="mat-low">${m.low > 0 ? `Warns at ${n2(m.low)} ${esc(m.unit)}` : 'No low-stock warning set'}${used ? ` · ${n2(used)} used today` : ''}</p>`
+          : `<p class="mat-qty"><b>${n2(used)}</b> ${esc(m.unit)} <small>used today</small></p>
+          <p class="mat-low">Store not counted yet. The app is adding up what goes out. Count it once to start tracking the store.</p>`}
+          <div class="mat-acts"><button data-move="in" data-mat="${m.id}">＋ Received</button><button data-move="out" data-mat="${m.id}">Give out</button><button data-move="back" data-mat="${m.id}">Returned</button><button data-cnt="${m.id}">${m.counted ? 'Count' : 'First count'}</button></div>
         </div>`; }).join('')}</div>`
       : `<div class="panel anim" style="--i:1"><p class="empty">No materials yet. Tap <b>+ Add material</b>, e.g. "Steel tube 1 inch" in metres, "Foam sheet" in sheets.</p></div>`}
       <div class="d-grid" style="margin-top:20px">
@@ -862,7 +897,7 @@
     const T_ = { in:['Received','Add a delivery to the store'], out:['Give out','Materials leaving the store'], back:['Returned','Leftovers brought back to the store'] }[kind];
     const open = S.orders.filter(o => !o.delivered && !orderProgress(o).finished);
     const s = openModal(`<h2>${T_[0]}</h2><p class="sub">${T_[1]}</p>
-      <label class="field"><span>Material</span><select id="vMat">${S.mats.filter(m => m.active).map(m => `<option value="${m.id}" ${m.id === matId ? 'selected' : ''}>${esc(m.name)} · ${n2(m.store)} ${esc(m.unit)} in store</option>`).join('')}</select></label>
+      <label class="field"><span>Material</span><select id="vMat">${S.mats.filter(m => m.active).map(m => `<option value="${m.id}" ${m.id === matId ? 'selected' : ''}>${esc(m.name)}${m.counted ? ` · ${n2(m.store)} ${esc(m.unit)} in store` : ''}</option>`).join('')}</select></label>
       <label class="field"><span>How much</span><div class="qty-in"><input id="vQty" type="number" min="0" step="any" inputmode="decimal"><em id="vUnit"></em></div></label>
       ${kind !== 'in' ? `<label class="field"><span>${kind === 'out' ? 'Who is taking it' : 'Who brought it back'}</span><select id="vWho"><option value="">Pick a worker</option>${S.workers.filter(w => w.active).map(w => `<option value="${w.id}">${esc(w.name)} · ${stageName(w.stage)}</option>`).join('')}</select></label>
       <label class="field"><span>For which order</span><select id="vOrd"><option value="">Not for a specific order</option>${open.map(o => `<option value="${o.id}">${o.ref} · ${o.qty} × ${esc(o.item)}</option>`).join('')}</select></label>
@@ -892,11 +927,11 @@
   function countModal(matId){
     const m = M(matId); if (!m) return;
     const s = openModal(`<h2>Count ${esc(m.name)}</h2>
-      <p class="sub">Go to the store and count what is really there. The app says there should be <b>${n2(m.store)} ${esc(m.unit)}</b>.</p>
+      <p class="sub">${m.counted ? `Go to the store and count what is really there. The app says there should be <b>${n2(m.store)} ${esc(m.unit)}</b>.` : `Go to the store and count how much ${esc(m.name)} is there. From now on the app keeps the store amount and warns you when it runs low.`}</p>
       <label class="field"><span>What you counted</span><div class="qty-in"><input id="cQty" type="number" min="0" step="any" inputmode="decimal"><em>${esc(m.unit)}</em></div></label>
       <p class="hint2" id="cHint"></p><p id="cErr" class="ferr"></p>
       <div class="actions"><button class="btn line" data-x>Cancel</button><button class="btn" id="cSave">Save count</button></div>`);
-    s.querySelector('#cQty').addEventListener('input', e => { const v = parseFloat(e.target.value); const d = isNaN(v) ? null : v - m.store;
+    s.querySelector('#cQty').addEventListener('input', e => { const v = parseFloat(e.target.value); const d = isNaN(v) || !m.counted ? null : v - m.store;
       s.querySelector('#cHint').innerHTML = d == null ? '' : d < 0 ? `<span style="color:var(--c-late);font-weight:600">${n2(-d)} ${esc(m.unit)} missing</span>` : d > 0 ? `${n2(d)} ${esc(m.unit)} more than expected` : '✓ Matches'; });
     s.querySelector('#cSave').onclick = async () => { const b = s.querySelector('#cSave'); b.disabled = true;
       const { data, error } = await db.rpc('ws_stock_count', { p_material: m.id, p_counted: s.querySelector('#cQty').value });

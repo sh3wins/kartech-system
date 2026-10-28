@@ -388,3 +388,16 @@ body.dash .toast{border-radius:12px;background:var(--forest)}
 .sp-w.pk b::before{content:"✓ ";color:var(--lime,#B8F04A)}
 .sp-any{font-size:12.5px;color:var(--muted,#5E6B63);font-style:italic}
 @media (max-width:760px){ .sp-who{margin-left:0} }
+
+.mat.nc .mat-qty small{font-size:13px;font-weight:600;color:var(--muted,#5E6B63)}
+.mat.nc .mat-low{line-height:1.4}
+
+/* same-time steps + pick people */
+.sp-tog{display:none;align-items:center;gap:8px;margin:10px 0 0 30px;font-size:13px;font-weight:600;color:var(--deep,#0F3D2E);cursor:pointer}
+.sp-row.on:not(.first) .sp-tog{display:flex}
+.sp-tog input{width:18px;height:18px;accent-color:var(--deep,#0F3D2E)}
+.tog-tag{display:inline-block;font-size:11.5px;font-weight:700;color:var(--deep,#0F3D2E);background:var(--lime-soft,#EEF8D6);border-radius:8px;padding:2px 7px;margin-left:6px;vertical-align:middle}
+.sp-who.pm{display:flex;margin:12px 0 4px}
+.pm-more{margin-top:10px}
+.pm-more summary{cursor:pointer;font-size:13px;font-weight:700;color:var(--deep,#0F3D2E)}
+@media (max-width:760px){ .sp-tog{margin-left:0} }
