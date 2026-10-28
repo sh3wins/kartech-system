@@ -69,14 +69,28 @@
     announceJobs(data);
     if (JSON.stringify(data) !== JSON.stringify(workers)){ workers = data; if (!me && !fm) render(); } }, 10000);
 
+
+  /* ---------- colour + emoji for each trade (makes the screen friendlier) ---------- */
+  const TRADE = { get:['#64748B','🏗️'], cut:['#F97316','🪚'], fold:['#3B82F6','📐'], weld:['#EF4444','🔥'], grind:['#8B5CF6','⚙️'],
+                  paint:['#EC4899','🎨'], foam:['#14B8A6','🛋️'], finish:['#EAB308','✨'], load:['#22C55E','🚚'] };
+  const SPARE = [['#0EA5E9','🔧'],['#F43F5E','🛠️'],['#84CC16','📦'],['#A855F7','🧰']];
+  const trade = id => TRADE[id] || SPARE[Math.max(0, STAGES.findIndex(x => x.id === id)) % SPARE.length];
+  const tc = id => `--tc:${trade(id)[0]}`;
+  const hello = () => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; };
+  const TIPS = ['Safety first: goggles and gloves on', 'Tools back on the rack by ' + (KT_CONFIG.toolCheckAt || '18:30') + '', 'Measure twice, cut once',
+                'Good work makes happy customers', 'Stuck? Tap your name and report a problem', 'Leftover material goes back to the store'];
+  function sideGreet(){ const g = $('#swHello'); if (!g) return; g.querySelector('b').textContent = hello() + ', team!';
+    const t = g.querySelector('small'); t.classList.remove('in'); void t.offsetWidth; t.textContent = TIPS[Math.floor(Date.now() / 20000) % TIPS.length]; t.classList.add('in'); }
+  setInterval(sideGreet, 20000);
+
   /* ---------- clock ---------- */
   function tickClock(){ const d = new Date();
     $('#clk').innerHTML = d.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' }).replace(':', '<i>:</i>');
     $('#clkDate').textContent = d.toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short', year:'numeric' }); }
-  tickClock(); setInterval(tickClock, 10000);
+  tickClock(); setInterval(tickClock, 10000); setTimeout(sideGreet, 0);
   let lastScreen = '';
 
-  /* ---------- FOREMAN page (behind the foreman code) ---------- */
+  /* ---------- FOREMAN page (behind the manager code) ---------- */
   async function loadTools(){
     const { data, error } = await db.rpc('ws_tool_list');
     tools = error ? null : data;
@@ -101,7 +115,7 @@
     const head = (title, sub, back) => `<div class="st-head anim"><div><h1>${title}</h1>${sub ? `<p class="lead">${sub}</p>` : ''}</div>
       <div class="st-out"><button class="btn line" id="${back ? 'fmBack' : 'fmExit'}">${back ? '← Back' : 'Close'}</button><p class="idle">Locks by itself after 2 minutes</p></div></div>`;
     if (fm.view === 'pin'){
-      v.innerHTML = `<div class="fm-pin anim"><h1>Foreman</h1><p class="lead">Enter the foreman code</p>
+      v.innerHTML = `<div class="fm-pin anim"><h1>Manager</h1><p class="lead">Enter the manager code</p>
         <div class="pindots">${[0,1,2,3].map(i => `<i class="${i < fm.entry.length ? 'on' : ''}"></i>`).join('')}</div>
         <div class="pad">${[1,2,3,4,5,6,7,8,9].map(n => `<button data-fk="${n}">${n}</button>`).join('')}<button data-fk="x" class="sm">Cancel</button><button data-fk="0">0</button><button data-fk="del" class="sm">⌫</button></div>
         <p class="err" id="fmErr">${fm.err || ''}</p></div>`;
@@ -115,7 +129,7 @@
         return `<button class="name fmname ${w.in ? 'in' : 'notin'}" data-fw="${w.id}"><span class="av">${w.in ? '✓' : esc(w.name.charAt(0))}</span><span>${esc(w.name)}<small>${w.in
           ? `In ${w.arrived_at ? fmTime(w.arrived_at) : ''}${n ? ' · 🔧 ' + n : ''}${w.job ? ' · ' + esc(w.job.ref) : ''}`
           : w.away ? 'Away today' : esc(stageName(w.stage)) + ' · tap when they arrive'}</small></span></button>`; };
-      v.innerHTML = head('Foreman', 'When a worker walks in, tap their name. Their tools pop up. Tick what they take.') + `
+      v.innerHTML = head('Manager', 'When a worker walks in, tap their name. Their tools pop up. Tick what they take.') + `
         <button class="tc-banner anim ${checkNeeded() ? 'due' : ''}" id="fmCheck" style="--i:1"><span>🔧</span><span><b>${d.done_today ? 'Tool check done for today ✓' : 'Evening tool check'}</b><small>${out.length ? out.length + ' tool' + (out.length > 1 ? 's' : '') + ' out right now' : 'All tools are in'}</small></span></button>
         <button class="fm-add anim" id="fmAddW" style="--i:1">＋ Add a new worker</button>
         ${notIn.length ? `<div class="st-group anim" style="--i:2"><h4>Not in yet · ${notIn.length}</h4><div class="names">${notIn.map(card).join('')}</div></div>` : ''}
@@ -200,7 +214,7 @@
       if (fm.entry.length === 4){
         fm.pin = fm.entry; fm.entry = '';
         const r = await fmLoad();
-        if (r !== true){ fm.pin = null; fm.err = r === 'wrong' ? 'Wrong code. Try again.' : r === 'locked' ? 'Too many wrong codes. Wait 5 minutes.' : r === 'nocode' ? 'The owner has not set a foreman code yet (Workers page in the app).' : ''; return renderForeman(); }
+        if (r !== true){ fm.pin = null; fm.err = r === 'wrong' ? 'Wrong code. Try again.' : r === 'locked' ? 'Too many wrong codes. Wait 5 minutes.' : r === 'nocode' ? 'The owner has not set a manager code yet (Workers page in the app).' : ''; return renderForeman(); }
         fm.view = fm.then || 'home';
         if (fm.view === 'check') fm.miss = new Set(fm.data.tools.filter(t => t.missing).map(t => t.id));
         return renderForeman();
@@ -272,25 +286,26 @@
     v.classList.toggle('enter', fresh);
     if (!me){
       const due = checkNeeded();
-      v.innerHTML = `<div class="fm-row anim">${due ? `<button class="tc-banner due" id="tcOpen"><span>🔧</span><span><b>It's ${KT_CONFIG.toolCheckAt || '18:30'}. Foreman: time for the tool check</b><small>Tap here before everyone goes home</small></span></button>` : ''}
-        <button class="fm-btn" id="fmOpen"><span>🔑</span><b>Foreman</b></button></div>
-        <h1 class="anim">Who's working?</h1><p class="lead anim" style="--i:1">Your job is under your name. Tap your name to see the details.</p>
+      v.innerHTML = `<div class="fm-row anim">${due ? `<button class="tc-banner due" id="tcOpen"><span>🔧</span><span><b>It's ${KT_CONFIG.toolCheckAt || '18:30'}. Manager: time for the tool check</b><small>Tap here before everyone goes home</small></span></button>` : ''}
+        <button class="fm-btn" id="fmOpen"><span>🔑</span><b>Manager</b></button></div>
+        <h1 class="anim hello-h">${hello()}, team! <span class="wave">👋</span></h1><p class="lead anim" style="--i:1">Find your name. Your job is right under it. Tap to see the details.</p>
         ${sound && navigator.userActivation && !navigator.userActivation.hasBeenActive ? '<p class="snd-hint anim">🔊 Tap anywhere once so the screen can call out new jobs.</p>' : ''}
-        ${workers.length ? STAGES.map((s, gi) => { const ws = workers.filter(w => w.stage === s.id); return ws.length ? `<div class="st-group anim" style="--i:${gi + 2}"><h4>${s.name}</h4><div class="names">${ws.map(w => { const j = w.job;
+        ${workers.length ? STAGES.map((s, gi) => { const ws = workers.filter(w => w.stage === s.id); return ws.length ? `<div class="st-group trade anim" style="--i:${gi + 2};${tc(s.id)}"><h4><span class="tr-ic">${trade(s.id)[1]}</span>${s.name}</h4><div class="names">${ws.map(w => { const j = w.job;
           const line = j ? `<small class="nj ${j.status === 'assigned' ? 'new' : ''}">${j.status === 'assigned' ? '<em>NEW</em>' : '▶'} ${esc(j.ref)} · ${esc(stageName(j.stage))}${j.with ? ' · with ' + esc(j.with) : ''}</small>` : w.job === null ? `<small class="nj free">Free${w.next ? ` · ${w.next} lined up` : ''}</small>` : '';
-          return `<button class="name ${j && j.status === 'assigned' ? 'has-new' : ''}" data-who="${w.id}"><span class="av">${esc(w.name.charAt(0))}</span><span class="nm">${esc(w.name)}${line}</span></button>`; }).join('')}</div></div>` : ''; }).join('')
+          return `<button class="name tn ${j && j.status === 'assigned' ? 'has-new' : ''}" data-who="${w.id}" style="${tc(w.stage)}"><span class="av">${esc(w.name.charAt(0))}</span><span class="nm">${esc(w.name)}${line}</span></button>`; }).join('')}</div></div>` : ''; }).join('')
           : '<div class="sw-card nowork anim" style="--i:2"><p class="big">No workers yet</p><p>The owner adds workers in the Kartech app.</p></div>'}`;
       return;
     }
     const t = job && job.task, o = job && job.order;
-    const head = `<div class="st-head anim"><div><h1>Hello, ${esc(job ? job.worker.name : '')}</h1><p class="lead">${job ? stageName(job.worker.stage) : ''}</p></div>
+    const head = `<div class="st-head anim"><div><h1>Hello, ${esc(job ? job.worker.name : '')} <span class="wave">👋</span></h1><p class="lead">${job ? stageName(job.worker.stage) : ''}</p></div>
       <div class="st-out"><button class="btn line" id="stOut">Sign out</button><p class="idle" id="idleTxt"></p></div></div>`;
     if (!t){
       v.innerHTML = head + `<div class="sw-card nowork anim" style="--i:1"><div class="dots"><i></i><i></i><i></i></div><p class="big">No job right now</p><p>The owner can see you're free. Your next job will show here as soon as it's ready.</p></div>`;
       return;
     }
     const working = t.status === 'working';
-    const card = `<div class="sw-card cur anim" style="--i:1">
+    const card = `<div class="sw-card cur tcard anim" style="--i:1;${tc(t.stage)}">
+        <span class="tcard-ic">${trade(t.stage)[1]}</span>
         <p class="k">Your current task</p>
         <p class="ref">${esc(o.ref)}</p>
         <p class="big">${o.qty} × ${esc(o.item)}</p>
@@ -312,6 +327,10 @@
 
   function cheer(text){
     const c = $('#cheer'); $('#cheerTxt').textContent = text;
+    c.querySelectorAll('.cf').forEach(x => x.remove());
+    const cols = ['#8ABFB2','#F97316','#3B82F6','#EC4899','#EAB308','#14B8A6','#fff'];
+    for (let i = 0; i < 36; i++){ const f = document.createElement('i'); f.className = 'cf';
+      f.style.cssText = `left:${Math.random() * 100}%;background:${cols[i % cols.length]};animation-delay:${Math.random() * .35}s;animation-duration:${1.1 + Math.random() * .7}s;transform:rotate(${Math.random() * 360}deg)`; c.appendChild(f); }
     c.classList.remove('hidden'); c.classList.remove('go'); void c.offsetWidth; c.classList.add('go');
     setTimeout(() => c.classList.add('hidden'), 1700);
   }

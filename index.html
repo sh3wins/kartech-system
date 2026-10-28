@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Kartech</title>
 <meta name="description" content="Kartech Engineering: shop and track your order, run the workshop, manage the business.">
-<meta name="theme-color" content="#1F3A2A">
+<meta name="theme-color" content="#185844">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -23,42 +23,43 @@
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600;700;800&family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
-  :root{ --forest:#1F3A2A; --forest2:#132619; --leaf:#2E6B45; --gold:#C9A24A; --paper:#F4F3EE; --ease:cubic-bezier(.2,.8,.2,1); }
+  :root{ --forest:#185844; --forest2:#102F27; --leaf:#1F6B53; --gold:#B08A4F; --lime:#B08A4F; --paper:#F4F3EE; --ease:cubic-bezier(.2,.8,.2,1); }
   *{box-sizing:border-box;margin:0;padding:0}
-  html,body{min-height:100%;background:var(--forest2);color:#fff;font-family:'Inter',sans-serif}
+  html,body{min-height:100%;background:var(--forest2);color:#fff;font-family:'DM Sans',sans-serif}
   button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
   .wrap{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 18px calc(28px + env(safe-area-inset-bottom,0px));
-    background:radial-gradient(1200px 600px at 15% -10%, #2D5A3E 0, transparent 60%), radial-gradient(900px 500px at 110% 110%, #24462F 0, transparent 55%), var(--forest2)}
+    background:radial-gradient(1000px 600px at 10% -10%, #1F6B53 0, transparent 60%), radial-gradient(700px 500px at 110% 110%, rgba(176,138,79,.18) 0, transparent 55%), var(--forest2)}
   .brand{display:flex;flex-direction:column;align-items:center;text-align:center;animation:rise .7s var(--ease) both}
   .mark{width:78px;height:78px;border-radius:22px;background:var(--forest);display:flex;align-items:center;justify-content:center;box-shadow:0 18px 40px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.08);position:relative}
   .mark svg{width:44px;height:44px}
+  .mark svg path{fill:var(--lime)}
   .mark::after{content:"";position:absolute;bottom:12px;width:22px;height:3px;background:var(--gold);border-radius:2px}
-  .name{font-family:'Archivo',sans-serif;font-weight:800;letter-spacing:.14em;font-size:22px;margin-top:18px}
-  .name small{display:block;font-family:'Inter';font-weight:500;font-size:11px;letter-spacing:.38em;opacity:.6;margin-top:6px}
-  h1{font-family:'Archivo',sans-serif;font-size:clamp(28px,6vw,40px);line-height:1.1;margin:34px 0 8px;text-align:center;animation:rise .7s .08s var(--ease) both}
-  .lead{color:#BFD0C4;text-align:center;max-width:420px;animation:rise .7s .14s var(--ease) both}
+  .name{font-family:'Fraunces',sans-serif;font-weight:800;letter-spacing:.14em;font-size:22px;margin-top:18px}
+  .name small{display:block;font-family:'DM Sans';font-weight:500;font-size:11px;letter-spacing:.38em;opacity:.6;margin-top:6px}
+  h1{font-family:'Fraunces',sans-serif;font-weight:800;font-size:clamp(30px,6.5vw,46px);line-height:1.1;margin:34px 0 8px;text-align:center;animation:rise .7s .08s var(--ease) both}
+  .lead{color:#B8C8BC;text-align:center;max-width:420px;animation:rise .7s .14s var(--ease) both}
   .roles{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;width:100%;max-width:980px;margin-top:34px}
-  .role{position:relative;text-align:left;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:20px;padding:22px 22px 20px;overflow:hidden;
-    transition:transform .3s var(--ease),background .3s,border-color .3s;animation:rise .7s var(--ease) both}
+  .role{position:relative;text-align:left;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:28px;padding:22px 22px 20px;overflow:hidden;
+    transition:transform .45s cubic-bezier(.34,1.56,.64,1),background .3s,border-color .3s;animation:rise .7s var(--ease) both}
   .role:nth-child(1){animation-delay:.2s}.role:nth-child(2){animation-delay:.28s}.role:nth-child(3){animation-delay:.36s}
-  .role:hover{transform:translateY(-4px);background:rgba(255,255,255,.1);border-color:rgba(143,211,167,.5)}
-  .role:active{transform:scale(.98)}
-  .role .ic{width:52px;height:52px;border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:26px;margin-bottom:16px;background:rgba(255,255,255,.1)}
-  .role.customer .ic{background:var(--gold)}
-  .role.workshop .ic{background:var(--leaf)}
-  .role.owner .ic{background:#fff}
-  .role b{display:block;font-family:'Archivo',sans-serif;font-size:21px;margin-bottom:4px}
-  .role p{color:#BFD0C4;font-size:14px;line-height:1.45}
-  .role .go{display:inline-flex;align-items:center;gap:6px;margin-top:16px;font-weight:600;font-size:14px;color:#8FD3A7;transition:gap .25s var(--ease)}
+  .role:hover{transform:translateY(-6px) rotate(-.5deg);background:rgba(255,255,255,.1);border-color:var(--lime)}
+  .role:active{transform:scale(.95);transition-duration:.08s}
+  .role .ic{width:56px;height:56px;border-radius:18px;display:flex;align-items:center;justify-content:center;font-size:26px;margin-bottom:16px;background:rgba(255,255,255,.1)}
+  .role.customer .ic{background:var(--lime)}
+  .role.workshop .ic{background:#fff}
+  .role.owner .ic{background:#1F6B53}
+  .role b{display:block;font-family:'Fraunces',sans-serif;font-size:21px;margin-bottom:4px}
+  .role p{color:#B8C8BC;font-size:14px;line-height:1.45}
+  .role .go{display:inline-flex;align-items:center;gap:6px;margin-top:16px;font-weight:600;font-size:14px;color:var(--lime);transition:gap .25s var(--ease)}
   .role:hover .go{gap:10px}
   .role::after{content:"";position:absolute;right:-40px;top:-40px;width:140px;height:140px;border-radius:50%;background:rgba(255,255,255,.04);transition:transform .5s var(--ease)}
   .role:hover::after{transform:scale(1.4)}
   .foot{margin-top:28px;display:flex;flex-direction:column;align-items:center;gap:10px;animation:rise .7s .45s var(--ease) both}
-  .remember{display:flex;align-items:center;gap:8px;color:#BFD0C4;font-size:13.5px}
-  .remember input{width:18px;height:18px;accent-color:#8FD3A7}
-  .install{display:none;background:#fff;color:var(--forest);font-weight:700;border-radius:12px;padding:12px 18px}
+  .remember{display:flex;align-items:center;gap:8px;color:#B8C8BC;font-size:13.5px}
+  .remember input{width:18px;height:18px;accent-color:var(--lime)}
+  .install{display:none;background:var(--lime);color:var(--forest);font-weight:800;border-radius:16px;padding:12px 18px}
   .install.show{display:inline-flex}
   .hint{color:#8EA596;font-size:12.5px;text-align:center;max-width:460px}
   @keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
@@ -92,7 +93,7 @@
     <button class="role workshop" data-role="workshop">
       <span class="ic">🔧</span>
       <b>Workshop</b>
-      <p>For the workshop computer or tablet. Workers tap their name to see their job. The foreman ticks tools and materials.</p>
+      <p>For the workshop computer or tablet. Workers tap their name to see their job. The manager ticks tools and materials.</p>
       <span class="go">Open workshop screen →</span>
     </button>
     <button class="role owner" data-role="owner">

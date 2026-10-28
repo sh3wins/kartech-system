@@ -33,14 +33,14 @@ begin
 
   insert into public.ws_moves (material_id, kind, qty, order_id, worker_id, note)
   values (m.id, k, case when k = 'out' then -q else q end, v_order, v_worker,
-          nullif(trim(concat_ws(' · ', nullif(left(trim(coalesce(p->>'note','')), 200), ''), case when p_by = 'foreman' then 'by foreman' end)), ''));
+          nullif(trim(concat_ws(' · ', nullif(left(trim(coalesce(p->>'note','')), 200), ''), case when p_by = 'foreman' then 'by manager' end)), ''));
   update public.ws_materials set in_store = in_store + case when k = 'out' then -q else q end where id = m.id;
 
   select * into o from public.ws_orders where id = v_order;
   select name into wname from public.ws_workers where id = v_worker;
   perform public.ws_note(case when k = 'out' then 'info' else 'good' end,
     case k when 'in' then 'Received ' || public.ws_fmt(q) || ' ' || m.unit || ' of ' || m.name
-           when 'out' then case when p_by = 'foreman' then 'Foreman gave ' else 'Gave ' end || public.ws_fmt(q) || ' ' || m.unit || ' of ' || m.name || ' to ' || coalesce(wname, 'a worker') || coalesce(' for ' || o.ref, '')
+           when 'out' then case when p_by = 'foreman' then 'Manager gave ' else 'Gave ' end || public.ws_fmt(q) || ' ' || m.unit || ' of ' || m.name || ' to ' || coalesce(wname, 'a worker') || coalesce(' for ' || o.ref, '')
            else coalesce(wname, 'A worker') || ' returned ' || public.ws_fmt(q) || ' ' || m.unit || ' of ' || m.name end, v_order);
 
   if k = 'out' and o.id is not null then

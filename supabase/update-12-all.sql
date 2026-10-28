@@ -161,13 +161,13 @@ begin
   if p->>'id' is null then
     if exists (select 1 from public.ws_workers where active and lower(name) = lower(v_name)) then raise exception '% is already on the list', v_name; end if;
     insert into public.ws_workers (name, stage, covers, pin_hash) values (v_name, v_stage, v_covers, extensions.crypt(gen_random_uuid()::text, extensions.gen_salt('bf')));
-    perform public.ws_note('good', 'Foreman added a new worker: ' || v_name || ', ' || public.ws_stage_name(v_stage));
+    perform public.ws_note('good', 'Manager added a new worker: ' || v_name || ', ' || public.ws_stage_name(v_stage));
   else
     select * into w from public.ws_workers where id = (p->>'id')::uuid and active;
     if w.id is null then raise exception 'Worker not found'; end if;
     update public.ws_workers set name = v_name, covers = v_covers,
       stage = case when w.task_id is null then v_stage else w.stage end where id = w.id;
-    perform public.ws_note('info', 'Foreman updated ' || v_name || ': ' || public.ws_stage_name(case when w.task_id is null then v_stage else w.stage end)
+    perform public.ws_note('info', 'Manager updated ' || v_name || ': ' || public.ws_stage_name(case when w.task_id is null then v_stage else w.stage end)
       || case when array_length(v_covers, 1) > 0 then ', can also do ' || (select string_agg(lower(public.ws_stage_name(x)), ', ') from unnest(v_covers) x) else '' end
       || case when w.task_id is not null and v_stage <> w.stage then ' (main job changes after the current job)' else '' end);
   end if;

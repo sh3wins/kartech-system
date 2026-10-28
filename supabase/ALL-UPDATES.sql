@@ -566,7 +566,7 @@ begin
   insert into public.ws_settings (key, value) values ('foreman_pin', extensions.crypt(p_pin, extensions.gen_salt('bf')))
   on conflict (key) do update set value = excluded.value, updated_at = now();
   delete from public.ws_settings where key in ('foreman_fails','foreman_locked');
-  perform public.ws_note('info', 'Foreman code changed');
+  perform public.ws_note('info', 'Manager code changed');
 end $$;
 
 create or replace function public.ws_has_foreman_pin() returns boolean
@@ -592,7 +592,7 @@ begin
     if fails >= 5 then
       insert into public.ws_settings (key, value) values ('foreman_locked', (now() + interval '5 minutes')::text) on conflict (key) do update set value = excluded.value;
       delete from public.ws_settings where key = 'foreman_fails';
-      perform public.ws_note('alert', 'Someone typed a wrong foreman code 5 times on the workshop screen');
+      perform public.ws_note('alert', 'Someone typed a wrong manager code 5 times on the workshop screen');
       return 'locked';
     end if;
     return 'wrong';
@@ -605,7 +605,7 @@ create or replace function public.ws_foreman_ok(p_pin text) returns void
 language plpgsql security definer set search_path = public as $$
 declare st text := public.ws_foreman_check(p_pin);
 begin
-  if st = 'nocode' then raise exception 'The owner has not set a foreman code yet'; end if;
+  if st = 'nocode' then raise exception 'The owner has not set a manager code yet'; end if;
   if st = 'locked' then raise exception 'Too many wrong codes. Try again in a few minutes.'; end if;
   if st <> 'ok' then raise exception 'Wrong code'; end if;
 end $$;
@@ -627,14 +627,14 @@ begin
 
   insert into public.ws_moves (material_id, kind, qty, order_id, worker_id, note)
   values (m.id, k, case when k = 'out' then -q else q end, v_order, v_worker,
-          nullif(trim(concat_ws(' · ', nullif(left(trim(coalesce(p->>'note','')), 200), ''), case when p_by = 'foreman' then 'by foreman' end)), ''));
+          nullif(trim(concat_ws(' · ', nullif(left(trim(coalesce(p->>'note','')), 200), ''), case when p_by = 'foreman' then 'by manager' end)), ''));
   update public.ws_materials set in_store = in_store + case when k = 'out' then -q else q end where id = m.id;
 
   select * into o from public.ws_orders where id = v_order;
   select name into wname from public.ws_workers where id = v_worker;
   perform public.ws_note(case when k = 'out' then 'info' else 'good' end,
     case k when 'in' then 'Received ' || public.ws_fmt(q) || ' ' || m.unit || ' of ' || m.name
-           when 'out' then case when p_by = 'foreman' then 'Foreman gave ' else 'Gave ' end || public.ws_fmt(q) || ' ' || m.unit || ' of ' || m.name || ' to ' || coalesce(wname, 'a worker') || coalesce(' for ' || o.ref, '')
+           when 'out' then case when p_by = 'foreman' then 'Manager gave ' else 'Gave ' end || public.ws_fmt(q) || ' ' || m.unit || ' of ' || m.name || ' to ' || coalesce(wname, 'a worker') || coalesce(' for ' || o.ref, '')
            else coalesce(wname, 'A worker') || ' returned ' || public.ws_fmt(q) || ' ' || m.unit || ' of ' || m.name end, v_order);
 
   if k = 'out' and o.id is not null then

@@ -1,0 +1,52 @@
+/* =====================================================================
+   KARTECH WORKSHOP — warm, clear, professional (loads last)
+   Each trade keeps its own colour (--tc) so people find their group fast.
+   No bouncing icons, no confetti: calm colour, strong contrast.
+   ===================================================================== */
+
+/* soft warm background */
+body.sw{background:linear-gradient(180deg,#F7F7FB 0%,#EDEDF5 100%) !important;background-attachment:fixed !important}
+
+/* side panel: deep green, calm */
+.sw-side{position:relative;overflow:hidden;background:linear-gradient(165deg,#01332B 0%,#0B4A3F 100%)!important}
+.sw-side > *{position:relative;z-index:1}
+.sw-side .blob{display:none}
+.sw-clock b{color:#fff}
+.sw-hello{margin:22px 0 auto;padding:14px 16px;border-radius:16px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12)}
+.sw-hello b{display:block;font-family:'Sora',sans-serif;font-size:19px;color:#8ABFB2}
+.sw-hello small{display:block;margin-top:6px;font-size:14.5px;line-height:1.45;color:#C4C4DB;opacity:0}
+.sw-hello small.in{animation:tipIn .5s ease both}
+@keyframes tipIn{from{opacity:0}to{opacity:1}}
+.sw-clock{margin:auto 0 0}
+
+/* headline: no waving hand here */
+.hello-h{font-size:40px!important}
+.sw .wave{display:none}
+
+/* each trade: small colour dot before the title */
+.st-group.trade h4{display:flex;align-items:center;gap:10px;color:#4A4152}
+.st-group.trade h4::before{content:"";width:12px;height:12px;border-radius:4px;background:var(--tc);flex:none}
+.st-group.trade h4 .tr-ic{display:none}
+
+/* name cards: colour only on the initial and a thin edge */
+.name.tn{position:relative;overflow:hidden;background:#fff!important}
+.name.tn::before{content:"";position:absolute;left:0;top:14px;bottom:14px;width:4px;border-radius:0 4px 4px 0;background:var(--tc)}
+.name.tn .av{background:var(--tc)!important;color:#fff!important}
+.name.tn:hover{background:#FCFDFB!important}
+
+/* the worker's job card: thin trade-colour top line */
+.sw-card.tcard{border-top:6px solid var(--tc)!important}
+.sw-card.tcard .tcard-ic{display:none}
+.sw-card.tcard .step{color:var(--tc)!important;font-weight:800;filter:brightness(.85)}
+
+/* buttons */
+.fm-btn{background:#8ABFB2!important;color:#01332B!important}
+.fmname.in .av{background:#8ABFB2!important;color:#01332B!important}
+
+/* no confetti */
+.sw-cheer .cf{display:none}
+
+@media (max-width:860px){
+  .sw-hello{display:none}
+  .hello-h{font-size:30px!important}
+}

@@ -136,15 +136,15 @@
     watchList().slice(0, 3).forEach(a => items.push({ lvl:'red', title:a.title, sub:a.sub, act:`<button class="btn sm line" data-tabgo="stock">See stock</button>` }));
     openMissing().forEach(x => { const t = TL(x.tool), w = x.worker && W(x.worker); if (!t) return;
       items.push({ lvl:'red', title:`Tool missing: ${t.name}`, sub:`${w ? 'Normally with ' + w.name + ' · ' : ''}not back since ${fmtDay(new Date(x.since + 'T12:00')).replace(/^(Today|Yesterday)$/, x => x.toLowerCase())}`, act:`<button class="btn sm line" data-toolfound="${t.id}">It's back</button>` }); });
-    if (S.hasCode === false && (S.tools.some(t => t.active) || S.mats.length)) items.push({ lvl:'amber', title:'Set the foreman code', sub:'The foreman needs it to tick tools and materials on the workshop screen', act:`<button class="btn sm line" data-fmcode>Set code</button>` });
+    if (S.hasCode === false && (S.tools.some(t => t.active) || S.mats.length)) items.push({ lvl:'amber', title:'Set the manager code', sub:'The manager needs it to tick tools and materials on the workshop screen', act:`<button class="btn sm line" data-fmcode>Set code</button>` });
     if (S.tools.some(t => t.active) && checkDue() && !S.toolChecks.find(c => c.day === todayStr()))
-      items.push({ lvl:'amber', title:'Tool check not done yet tonight', sub:`The foreman should check the tools at ${KT_CONFIG.toolCheckAt || '18:30'} on the workshop screen`, act:`<button class="btn sm line" data-tabgo="stock">See tools</button>` });
+      items.push({ lvl:'amber', title:'Tool check not done yet tonight', sub:`The manager should check the tools at ${KT_CONFIG.toolCheckAt || '18:30'} on the workshop screen`, act:`<button class="btn sm line" data-tabgo="stock">See tools</button>` });
     STAGES.forEach(st => { const q = queue(st.id); if (!q.length) return;
       const can = S.workers.filter(w => w.here && (w.stage === st.id || w.covers.includes(st.id)));
       if (!can.length) items.push({ lvl:'red', title:`Nobody in ${st.name} today`, sub:`${q.length} job${q.length > 1 ? 's' : ''} waiting. Pick someone to step up.`, act:`<button class="btn sm" data-give="${q[0].id}">Give to…</button>` }); });
     const nb = new Date(new Date().toLocaleString('en-US', { timeZone:'Africa/Nairobi' }));
     const notIn = S.workers.filter(w => w.active && !w.arrived && !w.away);
-    if (notIn.length && nb.getHours() >= 9 && nb.getHours() < 18) items.push({ lvl:'amber', title:`${notIn.length} worker${notIn.length > 1 ? 's' : ''} not ticked in yet`, sub:`${notIn.slice(0, 4).map(w => w.name).join(', ')}${notIn.length > 4 ? '…' : ''} · they get no jobs until the foreman ticks them in`, act:`<button class="btn sm line" data-tabgo="workers">See workers</button>` });
+    if (notIn.length && nb.getHours() >= 9 && nb.getHours() < 18) items.push({ lvl:'amber', title:`${notIn.length} worker${notIn.length > 1 ? 's' : ''} not ticked in yet`, sub:`${notIn.slice(0, 4).map(w => w.name).join(', ')}${notIn.length > 4 ? '…' : ''} · they get no jobs until the manager ticks them in`, act:`<button class="btn sm line" data-tabgo="workers">See workers</button>` });
     const idle = S.workers.filter(w => w.here && !w.task);
     if (idle.length) items.push({ lvl:'amber', title: idle.length === 1 ? `${idle[0].name} is waiting for work` : `${idle.slice(0, -1).map(w => w.name).join(', ')} and ${idle[idle.length - 1].name} are waiting for work`,
       sub: idle.length === 1 ? `${stageName(idle[0].stage)} · nothing in the line` : 'Nothing in their lines. Add an order or send a website order.', act:`<button class="btn sm line" data-tabgo="workshop">See workshop</button>` });
@@ -155,7 +155,7 @@
   }
 
   /* ---------- HOME: what needs her + workshop news ---------- */
-  const OWNER_RX = /^(New order|Website order|New worker added|Worker updated|Owner is on it|Problem solved|Received|Gave|New material added|New tool added|Tool back|Foreman code changed|Stock count: \S+ is correct)|made urgent|delivered to|switched (back on|off)/;
+  const OWNER_RX = /^(New order|Website order|New worker added|Worker updated|Owner is on it|Problem solved|Received|Gave|New material added|New tool added|Tool back|Manager code changed|Stock count: \S+ is correct)|made urgent|delivered to|switched (back on|off)/;
   const COLORS = ['#1f7a5c','#b5432f','#2f5fa8','#8a5a00','#7b3fa0','#0e7c86','#a0386b','#4d6b1f'];
   const colorOf = name => COLORS[[...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % COLORS.length];
   const hhmm = t => new Date(t).toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' });
@@ -350,8 +350,8 @@
       <div style="display:flex;justify-content:space-between;align-items:end;gap:12px;flex-wrap:wrap"><div><h2>Workers</h2>
       <p class="sub" style="margin-bottom:0">On the workshop screen (Kartech app → Workshop) each worker taps their name to see their job.</p></div>
       <button class="btn" data-addw>+ Add worker</button></div>
-      <div class="fm-card today-card"><span class="fm-ic">📋</span><div class="grow"><b>Today: ${S.workers.filter(w => w.here).length} in · ${S.workers.filter(w => w.active && !w.arrived && !w.away).length} not in yet${away.length ? ` · ${away.length} away` : ''}</b><p>The foreman ticks each worker in when they arrive (workshop screen → Foreman). Only workers who are in get jobs. You can also tap <b>Mark in</b> or <b>Away</b> here.</p></div></div>
-      <div class="fm-card anim"><span class="fm-ic">🔑</span><div class="grow"><b>Foreman code</b><p>${S.hasCode ? 'Set. The foreman uses it on the workshop screen to tick tools and materials.' : 'Not set yet. The foreman needs it to open his page on the workshop screen.'}</p></div><button class="btn ${S.hasCode ? 'line' : ''}" data-fmcode>${S.hasCode ? 'Change code' : 'Set code'}</button></div>
+      <div class="fm-card today-card"><span class="fm-ic">📋</span><div class="grow"><b>Today: ${S.workers.filter(w => w.here).length} in · ${S.workers.filter(w => w.active && !w.arrived && !w.away).length} not in yet${away.length ? ` · ${away.length} away` : ''}</b><p>The manager ticks each worker in when they arrive (workshop screen → Manager). Only workers who are in get jobs. You can also tap <b>Mark in</b> or <b>Away</b> here.</p></div></div>
+      <div class="fm-card anim"><span class="fm-ic">🔑</span><div class="grow"><b>Manager code</b><p>${S.hasCode ? 'Set. The manager uses it on the workshop screen to tick tools and materials.' : 'Not set yet. The manager needs it to open her page on the workshop screen.'}</p></div><button class="btn ${S.hasCode ? 'line' : ''}" data-fmcode>${S.hasCode ? 'Change code' : 'Set code'}</button></div>
       <div class="fm-card"><span class="fm-ic">🪜</span><div class="grow"><b>Workshop steps</b><p>${STAGES.map(x => esc(x.name)).join(' → ')}</p></div><button class="btn line" data-steps>Edit steps</button></div>
       ${STAGES.map(s => { const ws = S.workers.filter(w => w.stage === s.id); return `<p class="section-title">${s.name}${s.grp !== s.name ? ` <span class="grp-tag">${esc(s.grp)}</span>` : ''}</p>
         <div class="list">${ws.length ? ws.map(row).join('') : '<p class="empty">No one in this step yet.</p>'}</div>`; }).join('')}`;
@@ -744,7 +744,7 @@
         <p class="sub" style="margin:2px 0 0">${esc(stageName(w.stage))}${w.covers.length ? ' · also ' + w.covers.map(c => stageName(c).toLowerCase()).join(', ') : ''}</p></div>
         ${w.here ? `<span class="in-chip">✓ In${w.arrivedAt ? ' ' + new Date(w.arrivedAt).toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' }) : ''}</span>` : `<span class="pill p-normal">${w.away ? 'Away today' : 'Not in yet'}</span>`}</div>
       <div class="ww-now">${cur && curO ? `<b>Now:</b> ${esc(curO.ref)} · ${esc(stageName(cur.stage))} · ${curO.qty} × ${esc(curO.item)} <span class="pill p-${cur.status === 'working' ? 'working' : 'notstarted'}">${cur.status === 'working' ? 'Working' : 'Not started'}</span>`
-        : w.here ? `<b>Free right now.</b> Give him a job that is ready and it shows on the workshop screen straight away.` : `<b>Not in yet.</b> Work you give ${esc(w.name)} starts when the foreman ticks him in.`}</div>
+        : w.here ? `<b>Free right now.</b> Give him a job that is ready and it shows on the workshop screen straight away.` : `<b>Not in yet.</b> Work you give ${esc(w.name)} starts when the manager ticks him in.`}</div>
       <p class="section-title">${esc(stageName(w.stage))} work${mine.length ? ` <span class="grp-tag">${mine.length}</span>` : ''}</p>
       <div class="ww-list">${mine.map(row).join('') || '<p class="empty" style="padding:10px">No work waiting for this step.</p>'}</div>
       ${other.length ? `<details class="pm-more"><summary>Other steps (${other.length}): if ${esc(w.name)} is stepping up</summary><div class="ww-list">${other.map(row).join('')}</div></details>` : ''}
@@ -1003,7 +1003,7 @@
       out.push({ lvl:'red', title:`${n2(-x.qty)} ${m.unit} of ${m.name} missing`, sub:`Found at the store count · ${ago(x.at)}` }); });
     return out;
   }
-  /* ---------- TOOLS: evening check by the foreman ---------- */
+  /* ---------- TOOLS: evening check by the manager ---------- */
   const TL = id => S.tools.find(t => t.id === id);
   const todayStr = () => new Date().toLocaleDateString('en-CA', { timeZone:'Africa/Nairobi' });
   const checkDue = () => { const [h, m] = (KT_CONFIG.toolCheckAt || '18:30').split(':').map(Number);
@@ -1017,7 +1017,7 @@
     const status = done ? (done.missing ? `<span class="hp h-late">Tonight: ${done.missing} missing</span>` : `<span class="hp h-ready">Tonight: all back ✓</span>`)
       : `<span class="hp ${checkDue() ? 'h-risk' : 'h-track'}">Tonight's check: ${checkDue() ? 'not done yet' : 'at ' + (KT_CONFIG.toolCheckAt || '18:30')}</span>`;
     return `<div class="panel anim tools" style="--i:1"><div class="p-head"><h3>🔧 Tools</h3><span class="st-btns">${status}<button class="link" data-addtool>+ Add tool</button></span></div>
-      <p class="sub" style="font-size:13px;margin-bottom:6px">The foreman ticks who takes which tool on the workshop screen (Foreman page) and checks them all at ${KT_CONFIG.toolCheckAt || '18:30'}.</p>
+      <p class="sub" style="font-size:13px;margin-bottom:6px">The manager ticks who takes which tool on the workshop screen (Manager page) and checks them all at ${KT_CONFIG.toolCheckAt || '18:30'}.</p>
       ${S.tools.filter(t => t.active).length ? `<div class="tool-grid">${S.tools.filter(t => t.active).map(t => { const m = miss.find(x => x.tool === t.id); const w = t.worker && W(t.worker);
         return `<div class="tool ${m ? 'missing' : ''}"><button class="tool-name" data-edittool="${t.id}"><b>${esc(t.name)}</b><small>${t.stages.length ? t.stages.map(x => esc(stageName(x))).join(', ') : w ? 'Normally ' + esc(w.name) : 'No trade set'}</small></button>
           ${!m && S.loans.find(l => l.tool === t.id) ? (() => { const l = S.loans.find(z => z.tool === t.id), lw = W(l.worker); return `<span class="tool-out">With ${esc(lw ? lw.name : 'someone')}<small>since ${new Date(l.at).toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' })}</small></span>`; })() : ''}
@@ -1076,7 +1076,7 @@
     });
   }
   function fmCodeModal(){
-    const s = openModal(`<h2>Foreman code</h2><p class="sub">4 numbers. Tell the foreman in person. Change it any time, e.g. if the foreman changes.</p>
+    const s = openModal(`<h2>Manager code</h2><p class="sub">4 numbers. Tell the manager in person. Change it any time, e.g. if the manager changes.</p>
       <label class="field"><span>New code</span><input id="fcPin" inputmode="numeric" maxlength="4" placeholder="e.g. 4821" autocomplete="off" style="font-size:24px;letter-spacing:.3em"></label>
       <p id="fcErr" class="ferr"></p>
       <div class="actions"><button class="btn line" data-x>Cancel</button><button class="btn" id="fcSave">Save code</button></div>`);
@@ -1084,14 +1084,14 @@
       if (!/^\d{4}$/.test(pin)) return s.querySelector('#fcErr').textContent = 'The code must be exactly 4 numbers.';
       const { error } = await db.rpc('ws_set_foreman_pin', { p_pin: pin });
       if (error) return s.querySelector('#fcErr').textContent = errMsg(error);
-      closeModal(); toast('Foreman code saved'); await load(); };
+      closeModal(); toast('Manager code saved'); await load(); };
     setTimeout(() => s.querySelector('#fcPin').focus(), 50);
   }
   function toolModal(id){
     const t = id ? TL(id) : null;
     const s = openModal(`<h2>${t ? 'Edit ' + esc(t.name) : 'Add a tool'}</h2>
       <label class="field"><span>Name (use the number painted on it)</span><input id="tName" value="${t ? esc(t.name) : ''}" placeholder="e.g. Grinder 1" autocomplete="off"></label>
-      <div class="field"><span>Used by which trades (the foreman sees it when he taps these workers)</span>${stepChecks(t ? t.stages : [], 'tStage')}</div>
+      <div class="field"><span>Used by which trades (the manager sees it when she taps these workers)</span>${stepChecks(t ? t.stages : [], 'tStage')}</div>
       <label class="field"><span>Who normally uses it (optional)</span><select id="tWho"><option value="">Anyone</option>${S.workers.filter(w => w.active).map(w => `<option value="${w.id}" ${t && t.worker === w.id ? 'selected' : ''}>${esc(w.name)} · ${stageName(w.stage)}</option>`).join('')}</select></label>
       <p id="tErr" class="ferr"></p>
       <div class="actions" style="justify-content:space-between">${t ? '<button class="btn line" id="tOff" style="color:var(--c-late)">Remove tool</button>' : '<span></span>'}<span style="display:flex;gap:8px"><button class="btn line" data-x>Cancel</button><button class="btn" id="tSave">Save</button></span></div>`);
@@ -1149,7 +1149,7 @@
       <label class="field"><span>Name</span><input id="mName" value="${m ? esc(m.name) : ''}" placeholder="e.g. Steel tube 1 inch" autocomplete="off"></label>
       <div class="row2"><label class="field"><span>Counted in</span><input id="mUnit" value="${m ? esc(m.unit) : ''}" placeholder="m, sheets, pcs, litres" list="units"></label>
       <label class="field"><span>Warn me when it's down to</span><input id="mLow" type="number" min="0" step="any" value="${m ? m.low : ''}" placeholder="e.g. 20"></label></div>
-      <div class="field"><span>Used in which steps (the foreman only sees it for these workers)</span>${stepChecks(m ? m.stages : [], 'mStage')}</div>
+      <div class="field"><span>Used in which steps (the manager only sees it for these workers)</span>${stepChecks(m ? m.stages : [], 'mStage')}</div>
       <datalist id="units"><option>m</option><option>pcs</option><option>sheets</option><option>litres</option><option>kg</option><option>rolls</option></datalist>
       ${m ? '' : '<p class="sub" style="font-size:13px">Starts at 0. Then tap <b>Received</b> to add what is in the store now.</p>'}
       <p id="mErr" class="ferr"></p>
