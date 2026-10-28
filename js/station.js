@@ -20,7 +20,7 @@
       const { data: owner } = await db.rpc('is_admin');
       if (!owner){ await db.auth.signOut(); $('#setView').classList.remove('hidden'); $('#sErr').textContent = "That account isn't the workshop account."; return; }
     }
-    $('#setView').classList.add('hidden'); $('#live').classList.remove('hidden');
+    $('#setView').classList.add('hidden'); $('#live').classList.remove('hidden'); const sb = $('#sndBtn'); if (sb) sb.classList.remove('hidden'); soundBtn();
     await loadSteps();
     await loadNames();
   }
@@ -33,10 +33,41 @@
   });
 
   async function loadNames(){
-    const { data, error } = await db.rpc('ws_station_workers');
+    let { data, error } = await db.rpc('ws_station_board');
+    if (error && /ws_station_board|function/i.test(errMsg(error))) ({ data, error } = await db.rpc('ws_station_workers'));
+    if (!error) announceJobs(data);
     if (error){ v.innerHTML = `<h1>Can't reach the system</h1><p class="lead">${esc(errMsg(error))}</p><button class="giant done" id="retry">Try again</button>`; return; }
     workers = data; await loadTools(); render();
   }
+
+
+  /* ---------- new jobs: shown next to each name + said out loud ---------- */
+  let prevJob = null, sound = true;
+  try { sound = localStorage.getItem('kt-st-sound') !== 'off'; } catch(e){}
+  const sayRef = ref => String(ref).replace('KT-', 'K T ').split('').join(' ').replace(/\s+/g, ' ');
+  function beep(){ try { const a = new (window.AudioContext || window.webkitAudioContext)(); [0, .18].forEach(d => { const o = a.createOscillator(), g = a.createGain();
+      o.frequency.value = d ? 988 : 784; o.connect(g); g.connect(a.destination); g.gain.setValueAtTime(.25, a.currentTime + d); g.gain.exponentialRampToValueAtTime(.001, a.currentTime + d + .16); o.start(a.currentTime + d); o.stop(a.currentTime + d + .17); }); } catch(e){} }
+  function speak(text){
+    if (!sound || !window.speechSynthesis) return;
+    const u = new SpeechSynthesisUtterance(text);
+    const vs = speechSynthesis.getVoices(); const v = vs.find(x => /en[-_](KE|GB)/i.test(x.lang)) || vs.find(x => /^en/i.test(x.lang)); if (v){ u.voice = v; u.lang = v.lang; } else u.lang = 'en-GB';
+    u.rate = .9; speechSynthesis.speak(u);
+  }
+  function announceJobs(list){
+    const now = new Map((list || []).map(w => [w.id, w.job ? w.job.task : null]));
+    if (prevJob){
+      const fresh = (list || []).filter(w => w.job && w.job.status === 'assigned' && prevJob.get(w.id) !== w.job.task);
+      if (fresh.length){ beep(); setTimeout(() => fresh.slice(0, 4).forEach(w => speak(`${w.name}, new job: ${sayRef(w.job.ref)}, ${stageName(w.job.stage)}${w.job.with ? ', together with ' + w.job.with : ''}.`)), 450); }
+    }
+    prevJob = now;
+  }
+  function soundBtn(){ const b = $('#sndBtn'); if (!b) return; b.textContent = sound ? '🔊 Sound on' : '🔇 Sound off'; b.classList.toggle('off', !sound); }
+  document.addEventListener('click', e => { if (!e.target.closest('#sndBtn')) return;
+    sound = !sound; try { localStorage.setItem('kt-st-sound', sound ? 'on' : 'off'); } catch(x){} soundBtn(); if (sound){ beep(); speak('Job announcements are on.'); } });
+  setInterval(async () => { if (me || fm || document.visibilityState !== 'visible' || !workers.length && !prevJob) return;
+    const { data, error } = await db.rpc('ws_station_board'); if (error) return;
+    announceJobs(data);
+    if (JSON.stringify(data) !== JSON.stringify(workers)){ workers = data; if (!me && !fm) render(); } }, 10000);
 
   /* ---------- clock ---------- */
   function tickClock(){ const d = new Date();
@@ -86,6 +117,7 @@
           : w.away ? 'Away today' : esc(stageName(w.stage)) + ' · tap when they arrive'}</small></span></button>`; };
       v.innerHTML = head('Foreman', 'When a worker walks in, tap their name. Their tools pop up. Tick what they take.') + `
         <button class="tc-banner anim ${checkNeeded() ? 'due' : ''}" id="fmCheck" style="--i:1"><span>🔧</span><span><b>${d.done_today ? 'Tool check done for today ✓' : 'Evening tool check'}</b><small>${out.length ? out.length + ' tool' + (out.length > 1 ? 's' : '') + ' out right now' : 'All tools are in'}</small></span></button>
+        <button class="fm-add anim" id="fmAddW" style="--i:1">＋ Add a new worker</button>
         ${notIn.length ? `<div class="st-group anim" style="--i:2"><h4>Not in yet · ${notIn.length}</h4><div class="names">${notIn.map(card).join('')}</div></div>` : ''}
         ${inn.length ? `<div class="st-group anim" style="--i:3"><h4>In today · ${inn.length}</h4><div class="names">${inn.map(card).join('')}</div></div>` : ''}`;
       return;
@@ -98,7 +130,7 @@
       const tile = t => { const has = t.with === w.id, other = t.with && !has;
         return `<button class="tc ${has ? 'out' : other ? 'other' : ''}" data-ft="${t.id}"><span class="tc-ic">${has ? '✓' : other ? '•' : '+'}</span><span><b>${esc(t.name)}</b><small>${has ? 'Taken · ' + fmTime(t.since) : other ? 'With ' + esc(t.with_name || 'someone') : 'Tap if he takes it'}</small></span></button>`; };
       v.innerHTML = head(esc(w.name), `${stageName(w.stage)}${w.job ? ` · on <b>${esc(w.job.ref)}</b>, ${w.job.qty} × ${esc(w.job.item)}` : ''}`, true) + `
-        <div class="in-strip anim">${w.in ? `<span class="in-ok">✓ In today${w.arrived_at ? ' since ' + fmTime(w.arrived_at) : ''}</span><button class="link-sm" id="fmUnarrive">Ticked by mistake? Undo</button>` : `<span>Not in yet</span><button class="btn" id="fmArrive">Tick ${esc(w.name)} in</button>`}</div>
+        <div class="in-strip anim"><button class="link-sm fm-edw" id="fmEditW">✏️ Change ${esc(w.name)}'s job</button>${w.in ? `<span class="in-ok">✓ In today${w.arrived_at ? ' since ' + fmTime(w.arrived_at) : ''}</span><button class="link-sm" id="fmUnarrive">Ticked by mistake? Undo</button>` : `<span>Not in yet</span><button class="btn" id="fmArrive">Tick ${esc(w.name)} in</button>`}</div>
         <div class="st-group anim" style="--i:1"><h4>${esc(stageName(w.stage))} tools · tick what ${esc(w.name)} takes</h4>
           <div class="tc-grid">${mine.map(tile).join('') || `<p class="muted">No tools set for ${esc(stageName(w.stage))} yet. The owner sets this in the app (Stock → edit a tool → "Used by").</p>`}</div>
           ${others.length ? (fm.showAll ? `<h4 style="margin-top:16px">Other tools</h4><div class="tc-grid">${others.map(tile).join('')}</div>` : `<button class="link-sm" id="fmAllTools" style="margin-top:12px">+ Show other tools (${others.length})</button>`) : ''}</div>
@@ -107,6 +139,19 @@
             ${td && td.last ? `<button class="again" data-again="${m.id}" data-q="${nf(td.last)}">+ ${nf(td.last)} again</button>` : ''}</div>`; }).join('') || '<p class="muted">No materials for this step yet.</p>'}</div></div>
         <button class="giant go anim" id="fmDone" style="--i:3">✓ Done</button>
         ${fm.pick ? qtyPanel(w) : ''}`;
+      return;
+    }
+    if (fm.view === 'wedit'){
+      const e = fm.ed, chip = (st, on, attr) => `<button class="fm-chip ${on ? 'on' : ''}" ${attr}="${st.id}">${on ? '✓ ' : ''}${esc(st.name)}</button>`;
+      v.innerHTML = head(e.id ? 'Change ' + esc(e.orig) + "'s job" : 'Add a new worker', 'Their main job decides which work and tools come to them.', true) + `
+        <div class="st-group anim" style="--i:1"><h4>Name</h4><input class="fm-in" id="fmName" value="${esc(e.name)}" placeholder="e.g. Brighton" autocomplete="off"></div>
+        <div class="st-group anim" style="--i:2"><h4>Main job · pick one</h4><div class="fm-chips">${STAGES.map(st => chip(st, e.stage === st.id, 'data-fmain')).join('')}</div>
+          ${e.busy ? '<p class="muted" style="margin-top:8px">He is on a job now. A new main job starts after he finishes it.</p>' : ''}</div>
+        <div class="st-group anim" style="--i:3"><h4>Can also do · tap any (optional)</h4><div class="fm-chips">${STAGES.filter(st => st.id !== e.stage).map(st => chip(st, e.covers.includes(st.id), 'data-fcov')).join('')}</div></div>
+        <p class="err" id="fmWErr">${esc(e.err || '')}</p>
+        <button class="giant go anim" id="fmSaveW" style="--i:4">✓ ${e.id ? 'Save' : 'Add ' + (e.name ? esc(e.name) : 'worker')}</button>`;
+      const inp = $('#fmName'); inp.addEventListener('input', () => { fm.ed.name = inp.value; fmIdle(); const sb = $('#fmSaveW'); if (sb && !fm.ed.id) sb.textContent = '✓ Add ' + (inp.value.trim() || 'worker'); });
+      if (!e.id && !e.name) setTimeout(() => inp.focus(), 50);
       return;
     }
     if (fm.view === 'check'){
@@ -132,7 +177,20 @@
   async function fmClick(b){
     fmIdle();
     if (b.id === 'fmExit') return fmClose();
+    if (b.id === 'fmBack' && fm.view === 'wedit' && fm.ed && fm.ed.id){ fm.view = 'worker'; return renderForeman(); }
     if (b.id === 'fmBack'){ fm.view = 'home'; fm.pick = null; await fmLoad(); return renderForeman(); }
+    if (b.id === 'fmAddW'){ fm.ed = { id:null, name:'', stage:null, covers:[] }; fm.view = 'wedit'; return renderForeman(); }
+    if (b.id === 'fmEditW'){ const w = fmW(fm.wid); if (!w) return; fm.ed = { id:w.id, orig:w.name, name:w.name, stage:w.stage, covers:(w.covers || []).slice(), busy: !!w.job }; fm.view = 'wedit'; return renderForeman(); }
+    if (b.dataset.fmain){ fm.ed.stage = b.dataset.fmain; fm.ed.covers = fm.ed.covers.filter(x => x !== b.dataset.fmain); return renderForeman(); }
+    if (b.dataset.fcov){ const c = fm.ed.covers, x = b.dataset.fcov; fm.ed.covers = c.includes(x) ? c.filter(y => y !== x) : c.concat(x); return renderForeman(); }
+    if (b.id === 'fmSaveW'){ const e = fm.ed;
+      if (!e.name.trim()){ e.err = 'Type the name first.'; return renderForeman(); }
+      if (!e.stage){ e.err = 'Pick their main job.'; return renderForeman(); }
+      b.disabled = true;
+      const { error } = await db.rpc('ws_foreman_save_worker', { p_pin: fm.pin, p: { id: e.id, name: e.name.trim(), stage: e.stage, covers: e.covers } });
+      if (error){ e.err = /ws_foreman_save_worker/.test(errMsg(error)) ? 'The owner needs to run update-12-all.sql in Supabase first.' : errMsg(error); return renderForeman(); }
+      toast(e.id ? `${e.name.trim()} saved ✓` : `${e.name.trim()} added ✓ Tap their name when they arrive.`);
+      await fmLoad(); fm.view = e.id ? 'worker' : 'home'; fm.ed = null; return renderForeman(); }
     if (b.dataset.fk){
       const k = b.dataset.fk;
       if (k === 'x') return fmClose();
@@ -216,8 +274,11 @@
       const due = checkNeeded();
       v.innerHTML = `<div class="fm-row anim">${due ? `<button class="tc-banner due" id="tcOpen"><span>🔧</span><span><b>It's ${KT_CONFIG.toolCheckAt || '18:30'}. Foreman: time for the tool check</b><small>Tap here before everyone goes home</small></span></button>` : ''}
         <button class="fm-btn" id="fmOpen"><span>🔑</span><b>Foreman</b></button></div>
-        <h1 class="anim">Who's working?</h1><p class="lead anim" style="--i:1">Tap your name to see your job.</p>
-        ${workers.length ? STAGES.map((s, gi) => { const ws = workers.filter(w => w.stage === s.id); return ws.length ? `<div class="st-group anim" style="--i:${gi + 2}"><h4>${s.name}</h4><div class="names">${ws.map(w => `<button class="name" data-who="${w.id}"><span class="av">${esc(w.name.charAt(0))}</span>${esc(w.name)}</button>`).join('')}</div></div>` : ''; }).join('')
+        <h1 class="anim">Who's working?</h1><p class="lead anim" style="--i:1">Your job is under your name. Tap your name to see the details.</p>
+        ${sound && navigator.userActivation && !navigator.userActivation.hasBeenActive ? '<p class="snd-hint anim">🔊 Tap anywhere once so the screen can call out new jobs.</p>' : ''}
+        ${workers.length ? STAGES.map((s, gi) => { const ws = workers.filter(w => w.stage === s.id); return ws.length ? `<div class="st-group anim" style="--i:${gi + 2}"><h4>${s.name}</h4><div class="names">${ws.map(w => { const j = w.job;
+          const line = j ? `<small class="nj ${j.status === 'assigned' ? 'new' : ''}">${j.status === 'assigned' ? '<em>NEW</em>' : '▶'} ${esc(j.ref)} · ${esc(stageName(j.stage))}${j.with ? ' · with ' + esc(j.with) : ''}</small>` : w.job === null ? `<small class="nj free">Free${w.next ? ` · ${w.next} lined up` : ''}</small>` : '';
+          return `<button class="name ${j && j.status === 'assigned' ? 'has-new' : ''}" data-who="${w.id}"><span class="av">${esc(w.name.charAt(0))}</span><span class="nm">${esc(w.name)}${line}</span></button>`; }).join('')}</div></div>` : ''; }).join('')
           : '<div class="sw-card nowork anim" style="--i:2"><p class="big">No workers yet</p><p>The owner adds workers in the Kartech app.</p></div>'}`;
       return;
     }

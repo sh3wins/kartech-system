@@ -95,11 +95,12 @@
       S.hasCode = hc.error ? null : !!hc.data;
       S.toolMissing = tm.error ? [] : tm.data.map(x => ({ tool:x.tool_id, worker:x.worker_id, since:String(x.since).slice(0, 10), found: !!x.found_at }));
       S.std = sd.error ? [] : sd.data.map(x => ({ product:x.product, mat:x.material_id, per:+x.per_piece }));
-      S.orders = o.data.map(x => ({ id:x.id, ref:x.ref, src:x.source_order_id || null, srcNo:x.source_no || null, customer:x.customer, item:x.item, qty:x.qty, deadline:new Date(x.deadline + 'T17:00'), dl:String(x.deadline).slice(0, 10), urgency:x.urgency, notes:x.notes, stages:x.stages, delivered: !!x.delivered_at }));
-      S.tasks = t.data.map(x => ({ id:x.id, order:x.order_id, step:x.step, stage:x.stage, status:x.status, worker:x.worker_id, rank:x.rank, withPrev: !!x.with_prev, planned: Array.isArray(x.planned) ? x.planned : String(x.planned || '').replace(/[{}]/g, '').split(',').filter(Boolean),
+      S.orders = o.data.map(x => ({ id:x.id, ref:x.ref, src:x.source_order_id || null, srcNo:x.source_no || null, customer:x.customer, item:x.item, qty:x.qty, deadline:new Date(x.deadline + 'T17:00'), dl:String(x.deadline).slice(0, 10), urgency:x.urgency, notes:x.notes, stages:x.stages, delivered: !!x.delivered_at, createdAt: new Date(x.created_at).getTime(), delOn: x.delivery_on ? String(x.delivery_on).slice(0, 10) : null, delPlace: x.delivery_place || '', delNote: x.delivery_note || '', deliveredAt: x.delivered_at ? new Date(x.delivered_at).getTime() : null }));
+      S.tasks = t.data.map(x => ({ id:x.id, order:x.order_id, step:x.step, stage:x.stage, status:x.status, worker:x.worker_id, rank:x.rank, withPrev: !!x.with_prev, doneAt: x.done_at ? new Date(x.done_at).getTime() : null, planned: Array.isArray(x.planned) ? x.planned : String(x.planned || '').replace(/[{}]/g, '').split(',').filter(Boolean),
         problem: x.problem_at ? { reason:x.problem_reason, at:new Date(x.problem_at).getTime(), stopped:!!x.problem_stopped, ack: !!x.problem_ack_at } : null }));
       S.log = l.data.map(x => ({ id:x.id, text:x.text, kind:x.kind, at:new Date(x.at).getTime(), order:x.order_id }));
       loaded = true;
+      loadDay();
       announceChanges();
       $('#live').classList.remove('off'); $('#live').lastChild.textContent = ' Live';
       if (!document.querySelector('.scrim')) render();
@@ -121,7 +122,7 @@
   }
 
   /* ---------- views ---------- */
-  document.querySelectorAll('.tabs [data-tab]').forEach(b => b.addEventListener('click', () => { tab = b.dataset.tab; orderFilter = null; enter = true; render(); window.scrollTo(0,0); load(); if (tab === 'history') loadHistory(); }));
+  document.querySelectorAll('.tabs [data-tab]').forEach(b => b.addEventListener('click', () => { tab = b.dataset.tab; orderFilter = null; enter = true; render(); window.scrollTo(0,0); load(); if (tab === 'history') (H.mode === 'week' ? loadWeek() : loadHistory()); }));
   $('#newOrderBtn').onclick = $('#fab').onclick = () => newOrderModal();
 
   function attention(){
@@ -210,10 +211,11 @@
     const html = `
       <div class="d-head anim" style="--i:0">
         <div><p class="d-date">${now.toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short', year:'numeric' })}</p>
-        <h1>Good ${h < 12 ? 'morning' : h < 17 ? 'afternoon' : 'evening'} <span class="wave">👋</span></h1>
+        <h1>${briefing().hello} <span class="wave">👋</span></h1>
         <p class="sub" style="margin:0">${att.length ? `Here's what needs your attention today.` : 'Everything is running on its own. ✓'}</p></div>
         <button class="btn d-new" data-neworder><span>+</span> New order</button>
       </div>
+      ${briefCard()}
       <div class="kpis">
         ${box('late', 'Late', 'past the deadline', 'orders:late', '!')}
         ${box('urgent', 'Urgent', 'jobs to rush', 'orders:urgent', '⚡')}
@@ -305,6 +307,7 @@
           <div><div class="ref">${esc(w.order_no)}</div><div style="color:var(--muted);font-size:13px">${esc(w.customer_name)} · ${ago(new Date(w.created_at).getTime())}</div></div>
           <div class="webitems">${(w.items || []).map(i => `${i.qty} × ${esc(i.name)}`).join('<br>')}</div>
           <span class="btn sm">Send to workshop</span></button>`).join('')}</div></div>` : ''}
+      ${orderFilter ? '' : deliveriesPanel()}
       <h2>Orders</h2>
       <p class="sub">Most urgent first. Tap an order to see who's on it.</p>
       ${orderFilter ? `<p class="filter">Showing only <b>${orderFilter}</b> orders <button id="clearFilter">Show all ✕</button></p>` : ''}
@@ -356,7 +359,7 @@
 
 
   /* ---------- history: look back at any day ---------- */
-  const H = { day: null, worker: '', data: null, loading: false, err: '' };
+  const H = { day: null, worker: '', data: null, loading: false, err: '', mode: 'day', week: null, wdata: null };
   const hm = ts => ts ? new Date(ts).toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', timeZone:'Africa/Nairobi' }) : '';
   const addDays = (day, n) => { const d = new Date(day + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
   async function loadHistory(day){
@@ -370,6 +373,7 @@
   }
   function viewHistory(){
     if (!H.day) H.day = todayStr();
+    if (H.mode === 'week') return viewWeek();
     const today = todayStr(), isToday = H.day === today, d = H.data && H.data.day && String(H.data.day).slice(0, 10) === H.day ? H.data : null;
     const nm = id => { const w = W(id); return w ? w.name : 'Someone'; };
     const byW = x => !H.worker || x.worker === H.worker;
@@ -377,7 +381,7 @@
     const head = `
       <div style="display:flex;justify-content:space-between;align-items:end;gap:12px;flex-wrap:wrap"><div><h2>History</h2>
       <p class="sub" style="margin-bottom:0">Look back at any day: who came, what got done, which tools and materials went out.</p></div>
-      <button class="btn line" data-hprint>🖨 Print this day</button></div>
+      <span style="display:flex;gap:8px;align-items:center">${modeSeg()}<button class="btn line" data-hprint>🖨 Print this day</button></span></div>
       <div class="h-bar anim">
         <button class="btn line h-arrow" data-hday="-1" aria-label="Day before">‹</button>
         <label class="h-date"><b>${isToday ? 'Today' : H.day === addDays(today, -1) ? 'Yesterday' : esc(label.split(' ')[0])}</b><span>${esc(label)}</span><input type="date" id="hDate" value="${H.day}" max="${today}"></label>
@@ -434,10 +438,143 @@
         <div class="list">${log.length ? log.map(g => `<div class="item"><span class="h-time">${hm(g.at)}</span><div class="grow"><div class="s h-${g.kind}">${esc(g.text)}</div></div></div>`).join('') : '<p class="empty">Nothing.</p>'}</div>
       </details>`;
   }
+
+  /* ---------- weekly report (History → Week) ---------- */
+  const modeSeg = () => `<div class="seg-pick h-mode"><button type="button" data-hmode="day" class="${H.mode === 'day' ? 'on' : ''}">Day</button><button type="button" data-hmode="week" class="${H.mode === 'week' ? 'on' : ''}">Week</button></div>`;
+  const monday = iso => { const d = new Date(iso + 'T12:00:00Z'); const k = (d.getUTCDay() + 6) % 7; return addDays(iso, -k); };
+  async function loadWeek(start){
+    H.week = start || H.week || monday(todayStr()); H.wdata = null; H.err = ''; if (tab === 'history') render();
+    const want = H.week, days = [...Array(7)].map((_, i) => addDays(want, i)).filter(x => x <= todayStr());
+    const res = await Promise.all(days.map(x => db.rpc('ws_history', { p_day: x })));
+    if (want !== H.week) return;
+    const bad = res.find(r => r.error); if (bad){ H.err = errMsg(bad.error); } else H.wdata = res.map(r => r.data);
+    if (tab === 'history' && !document.querySelector('.scrim')) render();
+  }
+  function viewWeek(){
+    if (!H.week) H.week = monday(todayStr());
+    const thisWeek = H.week === monday(todayStr());
+    const end = addDays(H.week, 6), fmt = x => new Date(x + 'T12:00:00').toLocaleDateString('en-GB', { day:'numeric', month:'short' });
+    const head = `
+      <div style="display:flex;justify-content:space-between;align-items:end;gap:12px;flex-wrap:wrap"><div><h2>Weekly report</h2>
+      <p class="sub" style="margin-bottom:0">The whole week at a glance: orders, work done, attendance, materials and tools.</p></div>
+      <span style="display:flex;gap:8px;align-items:center">${modeSeg()}<button class="btn line" data-hprint>🖨 Print this week</button></span></div>
+      <div class="h-bar anim">
+        <button class="btn line h-arrow" data-hweek="-7" aria-label="Week before">‹</button>
+        <div class="h-date"><b>${thisWeek ? 'This week' : H.week === addDays(monday(todayStr()), -7) ? 'Last week' : 'Week of ' + fmt(H.week)}</b><span>Mon ${fmt(H.week)} – Sun ${fmt(end)}</span></div>
+        <button class="btn line h-arrow" data-hweek="7" ${thisWeek ? 'disabled' : ''} aria-label="Next week">›</button>
+        ${thisWeek ? '' : '<button class="btn sm line" data-hweek="now">Back to this week</button>'}
+      </div>`;
+    if (H.err) return head + `<p class="empty">Couldn't load this week. ${esc(H.err)}</p>`;
+    if (!H.wdata) return head + '<p class="empty">Loading…</p>';
+    const D = H.wdata, nm = id => W(id)?.name || 'Someone';
+    const logs = D.flatMap(d => d.log), jobs = D.flatMap(d => d.jobs);
+    const newOrders = logs.filter(g => /^New order KT-/.test(g.text)).length;
+    const finished = logs.filter(g => /is finished( and loaded)?\. Ready for delivery/.test(g.text)).length;
+    const delivered = logs.filter(g => / delivered to /.test(g.text)).length;
+    const alarms = logs.filter(g => g.kind === 'alert');
+    const missing = D.flatMap(d => d.missing);
+    const checks = D.filter(d => d.check).length;
+    const maxJobs = Math.max(1, ...D.map(d => d.jobs.length));
+    const bars = D.map(d => { const day = String(d.day).slice(0, 10);
+      return `<div class="wk-bar"><i style="height:${Math.round(100 * d.jobs.length / maxJobs)}%"></i><b>${d.jobs.length}</b><span>${new Date(day + 'T12:00:00').toLocaleDateString('en-GB', { weekday:'short' })}</span></div>`; }).join('');
+    const people = S.workers.filter(w => w.active || D.some(d => d.attendance.some(a => a.worker === w.id)));
+    const ppl = people.map(w => { const came = D.filter(d => d.attendance.some(a => a.worker === w.id && !a.away)).length, away = D.filter(d => d.attendance.some(a => a.worker === w.id && a.away)).length;
+      const steps = jobs.filter(j => j.worker === w.id).length;
+      return `<div class="item"><div class="grow"><div class="t">${esc(w.name)}</div><div class="s">${esc(stageName(w.stage))}</div></div>
+        <span class="wk-n"><b>${came}</b>/${D.length} days</span>${away ? `<span class="pill p-normal">${away} away</span>` : ''}<span class="wk-n"><b>${steps}</b> step${steps === 1 ? '' : 's'}</span></div>`; }).join('');
+    const used = {}; D.flatMap(d => d.materials).filter(m => m.kind === 'out' || m.kind === 'back').forEach(m => { const k = m.material + '|' + m.unit; used[k] = (used[k] || 0) - +m.qty; });
+    const usedRows = Object.entries(used).filter(([, q]) => q > 0).sort((a, b) => b[1] - a[1]).map(([k, q]) => { const [n, u] = k.split('|'); return `<div class="item"><div class="grow"><div class="t">${esc(n)}</div></div><span class="wk-n"><b>${n2(q)}</b> ${esc(u)}</span></div>`; }).join('');
+    const sum = (n, l, k) => `<div class="h-sum-c ${k || ''}"><b>${n}</b><span>${l}</span></div>`;
+    return head + `
+      <div class="h-sum anim">${sum(newOrders, 'New orders', 'k1')}${sum(jobs.length, 'Steps finished')}${sum(finished, 'Orders finished')}${sum(delivered, 'Delivered')}${sum(missing.length, 'Tools went missing', missing.length ? 'bad' : '')}</div>
+      <p class="section-title">✅ Steps finished each day</p><div class="panel wk-bars">${bars}</div>
+      <p class="section-title">👷 Attendance and work <span class="grp-tag">${D.length} day${D.length > 1 ? 's' : ''}</span></p><div class="list">${ppl || '<p class="empty">No workers.</p>'}</div>
+      <p class="section-title">📦 Materials used</p><div class="list">${usedRows || '<p class="empty">No materials given out this week.</p>'}</div>
+      <p class="section-title">🔧 Tools</p><div class="list"><div class="item"><div class="grow"><div class="t">Evening tool check done</div></div><span class="wk-n"><b>${checks}</b>/${D.length} days</span></div>
+        ${missing.map(m => `<div class="item"><div class="grow"><div class="t">Missing: ${esc(m.tool)}</div><div class="s">${m.worker ? 'Normally with ' + esc(nm(m.worker)) : ''}</div></div><span class="pill ${m.found ? 'p-normal' : 'p-attention'}">${m.found ? 'Found' : 'Still missing'}</span></div>`).join('')}</div>
+      ${alarms.length ? `<details class="h-all"><summary>🚨 Alarms this week (${alarms.length})</summary><div class="list">${alarms.map(g => `<div class="item"><span class="h-time">${new Date(g.at).toLocaleDateString('en-GB', { weekday:'short', timeZone:'Africa/Nairobi' })}</span><div class="grow"><div class="s">${esc(g.text)}</div></div></div>`).join('')}</div></details>` : ''}`;
+  }
   document.addEventListener('change', e => {
     if (e.target.id === 'hDate' && e.target.value){ loadHistory(e.target.value > todayStr() ? todayStr() : e.target.value); }
     if (e.target.id === 'hWorker'){ H.worker = e.target.value; render(); }
   });
+
+  /* ---------- morning briefing / evening recap ---------- */
+  let dayAt = 0;
+  async function loadDay(){
+    if (Date.now() - dayAt < 60000) return; dayAt = Date.now();
+    const { data, error } = await db.rpc('ws_history', { p_day: todayStr() });
+    if (!error && data){ S.day = data; if (tab === 'today' && !document.querySelector('.scrim')) render(); autoBrief(); }
+  }
+  const nbHour = () => +new Date().toLocaleString('en-GB', { hour:'2-digit', hour12:false, timeZone:'Africa/Nairobi' });
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + 's')}`;
+  function briefing(){
+    const h = nbHour(), part = h < 12 ? 'morning' : h < 17 ? 'afternoon' : 'evening';
+    const hello = `Good ${part}, Kartech`;
+    const t0 = new Date(todayStr() + 'T00:00:00+03:00').getTime(), isToday = x => x && x >= t0;
+    const active = S.workers.filter(w => w.active), here = active.filter(w => w.here), away = active.filter(w => w.away);
+    const notIn = active.filter(w => !w.here && !w.away);
+    const open = S.orders.filter(o => !o.delivered && !orderProgress(o).finished);
+    const late = open.filter(o => isLate(o.deadline));
+    const dueToday = open.filter(o => o.dl === todayStr());
+    const ready = S.tasks.filter(t => t.status === 'queued' && O(t.order) && !O(t.order).delivered);
+    const doneToday = S.tasks.filter(t => t.status === 'done' && isToday(t.doneAt));
+    const newToday = S.orders.filter(o => isToday(o.createdAt));
+    const finishedToday = S.orders.filter(o => { const ts = S.tasks.filter(t => t.order === o.id); return ts.length && ts.every(t => t.status === 'done') && ts.some(t => isToday(t.doneAt)); });
+    const deliveredToday = S.orders.filter(o => isToday(o.deliveredAt));
+    const web = waitingWeb();
+    const byStep = list => { const c = {}; list.forEach(t => c[t.stage] = (c[t.stage] || 0) + 1);
+      return Object.entries(c).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([st, n]) => `${n} ${stageName(st).toLowerCase()}`).join(', '); };
+    const used = {}; ((S.day && S.day.materials) || []).filter(m => m.kind === 'out' || m.kind === 'back').forEach(m => { const k = m.material + '|' + m.unit; used[k] = (used[k] || 0) - +m.qty; });
+    const usedTxt = Object.entries(used).filter(([, q]) => q > 0).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, q]) => { const [n, u] = k.split('|'); return `${n2(q)} ${u} ${n.toLowerCase()}`; }).join(', ');
+    const toolsOut = S.loans.length, missing = openMissing().length;
+    const L = [];   // [icon, text, tone]
+    if (part === 'morning'){
+      L.push(['👷', active.length ? `${here.length} of ${active.length} workers in so far${notIn.length && notIn.length <= 4 ? ` · not in yet: ${notIn.map(w => w.name).join(', ')}` : ''}${away.length ? ` · ${away.length} away` : ''}` : 'No workers added yet', notIn.length ? 'warn' : 'ok']);
+      L.push(['🧰', ready.length ? `${plural(ready.length, 'job')} ready to start${byStep(ready) ? ': ' + byStep(ready) : ''}` : 'No jobs waiting to start', '']);
+      if (dueToday.length) L.push(['📅', `Due today: ${dueToday.map(o => o.ref).join(', ')}`, 'warn']);
+      const dToday = S.orders.filter(o => !o.delivered && o.delOn === todayStr());
+      if (dToday.length) L.push(['🚚', `Deliveries today: ${dToday.map(o => o.ref + (o.delPlace ? ' (' + o.delPlace + ')' : '')).join(', ')}`, 'warn']);
+      if (late.length) L.push(['⏰', `${plural(late.length, 'order')} past the deadline`, 'bad']);
+      if (web.length) L.push(['🌐', `${plural(web.length, 'website order')} waiting to be sent to the workshop`, 'warn']);
+      if (missing) L.push(['🔧', `${plural(missing, 'tool')} still missing from before`, 'bad']);
+    } else if (part === 'afternoon'){
+      L.push(['✅', doneToday.length ? `${plural(doneToday.length, 'step')} finished so far today: ${byStep(doneToday)}` : 'No steps finished yet today', doneToday.length ? 'ok' : '']);
+      L.push(['🆕', `${plural(newToday.length, 'new order')} today`, '']);
+      L.push(['▶', `${plural(S.tasks.filter(t => t.status === 'working' || t.status === 'assigned').length, 'job')} in the workshop right now · ${here.length} workers in`, '']);
+      if (late.length) L.push(['⏰', `${plural(late.length, 'order')} past the deadline`, 'bad']);
+      if (web.length) L.push(['🌐', `${plural(web.length, 'website order')} waiting`, 'warn']);
+    } else {
+      L.push(['🆕', `${plural(newToday.length, 'new order')} today${newToday.length ? ': ' + newToday.slice(0, 4).map(o => `${o.qty} × ${o.item.toLowerCase()}`).join(', ') : ''}`, newToday.length ? 'ok' : '']);
+      L.push(['✅', doneToday.length ? `${plural(doneToday.length, 'step')} finished: ${byStep(doneToday)}` : 'No steps finished today', doneToday.length ? 'ok' : 'warn']);
+      if (finishedToday.length) L.push(['🎉', `${plural(finishedToday.length, 'order')} completely finished: ${finishedToday.map(o => o.ref).join(', ')}`, 'ok']);
+      if (deliveredToday.length) L.push(['🚚', `${plural(deliveredToday.length, 'order')} delivered`, 'ok']);
+      L.push(['👷', `${here.length} of ${active.length} workers came in${away.length ? ` · ${away.length} away` : ''}`, '']);
+      if (usedTxt) L.push(['📦', `Used today: ${usedTxt}`, '']);
+      L.push(['🔧', toolsOut ? `${plural(toolsOut, 'tool')} still out` + (missing ? ` · ${missing} missing` : '') : 'All tools are back ✓', toolsOut || missing ? 'warn' : 'ok']);
+      if (late.length) L.push(['⏰', `${plural(late.length, 'order')} past the deadline`, 'bad']);
+      const dTom = S.orders.filter(o => !o.delivered && o.delOn === addDays(todayStr(), 1));
+      if (dTom.length) L.push(['🚚', `Deliveries tomorrow: ${dTom.map(o => o.ref + (o.delPlace ? ' (' + o.delPlace + ')' : '')).join(', ')}`, '']);
+      L.push(['🌅', ready.length ? `Tomorrow: ${plural(ready.length, 'job')} ready to start` : 'Tomorrow: nothing waiting yet', '']);
+    }
+    const title = part === 'evening' ? "Here's a recap of today's work" : part === 'morning' ? "Here's today's plan" : 'How today is going';
+    const speech = `${hello}. ${title}. ` + L.map(x => x[1].replace(/KT-(\d+)/g, (m, d) => sayRef('KT-' + d)).replace(/ × /g, ' ').replace(/·/g, ',').replace(/✓/g, '')).join('. ') + '.';
+    return { part, hello, title, lines: L, speech };
+  }
+  function briefCard(){
+    const b = briefing();
+    const ic = { morning:'☀️', afternoon:'🌤️', evening:'🌙' }[b.part];
+    return `<div class="brief b-${b.part} anim" style="--i:0"><div class="brief-head"><span class="brief-ic">${ic}</span><div class="grow"><b>${b.title}</b><small>${new Date().toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long' })}</small></div>
+      <button class="btn sm brief-say" data-brief>🔊 Read it to me</button></div>
+      <ul>${b.lines.map(([i, t, tone]) => `<li class="${tone}"><span>${i}</span>${esc(t)}</li>`).join('')}</ul></div>`;
+  }
+  function autoBrief(){
+    if (VOICE.lang === 'off' || !window.speechSynthesis) return;
+    const b = briefing(), key = 'kt-brief-' + todayStr() + '-' + b.part;
+    try { if (localStorage.getItem(key)) return; localStorage.setItem(key, '1'); } catch(e){ return; }
+    if (b.part === 'afternoon') return;   // only the morning plan and evening recap speak by themselves
+    say(b.speech, { interrupt:true });
+  }
 
   function waitingWeb(){
     const linked = new Set(S.orders.map(o => o.src).filter(Boolean));
@@ -467,6 +604,9 @@
   /* ---------- clicks ---------- */
   document.addEventListener('click', async e => {
     if (e.target.closest('[data-addw]')) return workerModal();
+    if (e.target.closest('[data-brief]')){ if (VOICE.lang === 'off') return toast('Voice is off. Turn it on in Voice & settings.'); return say(briefing().speech, { interrupt:true }); }
+    const hm2 = e.target.closest('[data-hmode]'); if (hm2){ H.mode = hm2.dataset.hmode; if (H.mode === 'week') return loadWeek(); render(); return loadHistory(); }
+    const hw = e.target.closest('[data-hweek]'); if (hw){ return loadWeek(hw.dataset.hweek === 'now' ? monday(todayStr()) : (x => x > todayStr() ? monday(todayStr()) : x)(addDays(H.week || monday(todayStr()), +hw.dataset.hweek))); }
     const hd = e.target.closest('[data-hday]'); if (hd){ return loadHistory(hd.dataset.hday === 'today' ? todayStr() : (x => x > todayStr() ? todayStr() : x)(addDays(H.day || todayStr(), +hd.dataset.hday))); }
     if (e.target.closest('[data-hprint]')){ document.querySelectorAll('.h-all').forEach(x => x.open = true); return window.print(); }
     const wb = e.target.closest('[data-web]'); if (wb) return webModal(wb.dataset.web);
@@ -479,6 +619,7 @@
     if (e.target.closest('[data-steps]')) return stepsModal();
     const gv = e.target.closest('[data-give]'); if (gv) return giveModal(gv.dataset.give);
     const pl = e.target.closest('[data-plan]'); if (pl) return planModal(pl.dataset.plan);
+    const dp = e.target.closest('[data-dplan]'); if (dp) return deliveryModal(dp.dataset.dplan);
     const ww = e.target.closest('[data-wwork]'); if (ww && !ww.disabled) return workerWorkModal(ww.dataset.wwork);
     const aw = e.target.closest('[data-away]'); if (aw){ aw.disabled = true; const w = W(aw.dataset.away);
       return act('ws_set_away', { p_worker: aw.dataset.away, p_away: aw.dataset.v === '1' }, aw.dataset.v === '1' ? `${w ? w.name : 'Worker'} is away today` : `${w ? w.name : 'Worker'} is in`); }
@@ -502,6 +643,84 @@
   function closeModal(){ document.querySelector('.scrim')?.remove(); }
   function openModal(html){ closeModal(); const s = document.createElement('div'); s.className = 'scrim'; s.innerHTML = `<div class="modal">${html}</div>`; s.addEventListener('click', e => { if (e.target === s || e.target.closest('[data-x]')) closeModal(); }); document.body.appendChild(s); return s; }
 
+
+  /* ---------- photos of the work (private, owner only) ---------- */
+  const PH_BUCKET = 'kartech-photos';
+  async function loadPhotos(orderId){
+    const g = $('#phGrid'); if (!g) return;
+    const { data, error } = await db.from('ws_photos').select('*').in('order_id', [orderId]).order('id');
+    if (!document.body.contains(g)) return;
+    if (error){ g.innerHTML = `<span class="ph-empty">${/ws_photos/.test(errMsg(error)) ? 'Run update-12-all.sql in Supabase to turn on photos.' : esc(errMsg(error))}</span>`; return; }
+    if (!data.length){ g.innerHTML = '<span class="ph-empty">No photos yet.</span>'; return; }
+    let urls = [];
+    if (db.storage){ const r = await db.storage.from(PH_BUCKET).createSignedUrls(data.map(x => x.path), 3600); urls = r.data || []; }
+    if (!document.body.contains(g)) return;
+    g.innerHTML = data.map((x, i) => { const u = urls[i] && urls[i].signedUrl;
+      return `<div class="ph">${u ? `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" alt="Photo ${i + 1}" loading="lazy"></a>` : '<span class="ph-x">📷</span>'}
+        <small>${new Date(x.at).toLocaleDateString('en-GB', { day:'numeric', month:'short' })}</small><button class="ph-rm" data-phrm="${x.id}" aria-label="Remove photo">✕</button></div>`; }).join('');
+    g.onclick = async e => { const b = e.target.closest('[data-phrm]'); if (!b) return;
+      if (!b.classList.contains('sure')){ b.classList.add('sure'); b.textContent = 'Remove?'; setTimeout(() => { if (document.body.contains(b)){ b.classList.remove('sure'); b.textContent = '✕'; } }, 4000); return; }
+      b.disabled = true; const { data: path, error } = await db.rpc('ws_remove_photo', { p_id: +b.dataset.phrm });
+      if (error) return toast(errMsg(error));
+      if (path && db.storage) await db.storage.from(PH_BUCKET).remove([path]);
+      toast('Photo removed'); loadPhotos(orderId); };
+  }
+  function shrink(file){
+    return new Promise((ok, no) => { const img = new Image(), url = URL.createObjectURL(file);
+      img.onload = () => { const k = Math.min(1, 1600 / Math.max(img.width, img.height)); const c = document.createElement('canvas');
+        c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url); c.toBlob(b => b ? ok(b) : no(new Error('Could not read the photo')), 'image/jpeg', .82); };
+      img.onerror = () => { URL.revokeObjectURL(url); no(new Error('That file is not a photo')); }; img.src = url; });
+  }
+  async function addPhoto(o, file){
+    const g = $('#phGrid'); if (g) g.insertAdjacentHTML('beforeend', '<span class="ph-empty" id="phUp">Uploading…</span>');
+    try {
+      if (!db.storage) throw new Error('Photos need the real Supabase');
+      const blob = await shrink(file), path = `${o.id}/${Date.now()}.jpg`;
+      const up = await db.storage.from(PH_BUCKET).upload(path, blob, { contentType:'image/jpeg', upsert:false });
+      if (up.error) throw up.error;
+      const { error } = await db.rpc('ws_add_photo', { p_order: o.id, p_path: path });
+      if (error){ await db.storage.from(PH_BUCKET).remove([path]); throw error; }
+      toast(`Photo added to ${o.ref}`); loadPhotos(o.id);
+    } catch(e){ $('#phUp')?.remove(); toast(/bucket|not found/i.test(errMsg(e)) ? 'Run update-12-all.sql in Supabase to turn on photos.' : errMsg(e)); }
+  }
+
+  /* ---------- deliveries ---------- */
+  const dayName = iso => { const t = todayStr(); if (iso === t) return 'Today'; if (iso === addDays(t, 1)) return 'Tomorrow';
+    return new Date(iso + 'T12:00:00').toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short' }); };
+  function deliveriesPanel(){
+    const t = todayStr();
+    const list = S.orders.filter(o => !o.delivered && (o.delOn || orderProgress(o).finished))
+      .sort((a, b) => (a.delOn || '9999') < (b.delOn || '9999') ? -1 : (a.delOn || '9999') > (b.delOn || '9999') ? 1 : a.deadline - b.deadline);
+    if (!list.length) return '';
+    const row = o => { const fin = orderProgress(o).finished, late = o.delOn && o.delOn < t;
+      return `<div class="dl-row ${late ? 'late' : ''}"><span class="dl-day ${o.delOn === t ? 'today' : ''}">${o.delOn ? esc(dayName(o.delOn)) : 'Not planned'}</span>
+        <button class="grow dl-info" data-open="${o.id}"><b>${esc(o.ref)} · ${o.qty} × ${esc(o.item)}</b><small>${esc(o.customer)}${o.delPlace ? ' · 📍 ' + esc(o.delPlace) : ''}${o.delNote ? ' · ' + esc(o.delNote) : ''}${fin ? ' · <em class="ok">ready ✓</em>' : ' · still in the workshop'}</small></button>
+        <span class="dl-acts"><button class="btn sm line" data-dplan="${o.id}">📅 ${o.delOn ? 'Move' : 'Plan'}</button>${fin ? `<button class="btn sm" data-deliver="${o.id}">Delivered</button>` : ''}</span></div>`; };
+    return `<div class="panel dl-panel anim"><div class="p-head"><h3>🚚 Deliveries <span class="count">${list.length}</span></h3></div>${list.map(row).join('')}
+      <p class="hint-sm">Move a date (e.g. because of the rains) and website customers see the new date on their tracking page.</p></div>`;
+  }
+  function deliveryModal(id){
+    const o = O(id); if (!o) return;
+    const why = ['Rains / roads', 'Customer asked', 'Not ready yet', 'Transport problem'];
+    const s = openModal(`<h2>🚚 Delivery · ${esc(o.ref)}</h2>
+      <p class="sub" style="margin-top:-6px">${o.qty} × ${esc(o.item)} for ${esc(o.customer)}</p>
+      <label class="field"><span>Delivery day</span><input id="dDay" type="date" value="${o.delOn || addDays(todayStr(), 1)}" min="${todayStr()}"></label>
+      <label class="field"><span>Where</span><input id="dPlace" value="${esc(o.delPlace)}" placeholder="e.g. Nyeri town, Kanisa Academy"></label>
+      <div class="field"><span>Reason${o.delOn ? ' for the change' : ''} (optional, the customer sees it)</span>
+        <div class="dl-why">${why.map(w => `<button type="button" class="sp-w ${o.delNote === w ? 'pk' : ''}" data-why="${esc(w)}"><b>${esc(w)}</b></button>`).join('')}</div>
+        <input id="dNote" value="${esc(o.delNote)}" placeholder="or type your own" style="margin-top:8px"></div>
+      <p id="dErr" class="ferr"></p>
+      <div class="actions" style="justify-content:space-between">${o.delOn ? '<button class="btn line" id="dClear">Clear date</button>' : '<span></span>'}
+        <span style="display:flex;gap:10px"><button class="btn line" data-x>Cancel</button><button class="btn" id="dSave">Save</button></span></div>`);
+    s.addEventListener('click', e => { const b = e.target.closest('[data-why]'); if (!b) return; const on = !b.classList.contains('pk');
+      s.querySelectorAll('[data-why]').forEach(x => x.classList.remove('pk')); if (on) b.classList.add('pk'); s.querySelector('#dNote').value = on ? b.dataset.why : ''; });
+    const save = async clear => { const { error } = await db.rpc('ws_set_delivery', { p_order: o.id, p_day: clear ? null : (s.querySelector('#dDay').value || null), p_place: s.querySelector('#dPlace').value, p_note: clear ? '' : s.querySelector('#dNote').value });
+      if (error){ s.querySelector('#dErr').textContent = /ws_set_delivery/.test(errMsg(error)) ? 'Run update-12-all.sql in Supabase first.' : errMsg(error); return; }
+      closeModal(); toast(clear ? `${o.ref}: delivery date cleared` : `${o.ref}: delivery ${dayName(s.querySelector('#dDay').value)}`); await load(); };
+    s.querySelector('#dSave').onclick = () => save(false);
+    const c = s.querySelector('#dClear'); if (c) c.onclick = () => save(true);
+  }
 
   /* ---------- tap a worker → the work available for them ---------- */
   function workerWorkModal(wid){
@@ -738,9 +957,13 @@
       ${o.srcNo ? `<p style="margin:4px 0;font-size:13px;color:var(--muted)">🌐 Website order ${esc(o.srcNo)} · the customer sees these steps live on their tracking page</p>` : ''}
       ${o.notes ? `<p style="margin:6px 0;padding:10px 12px;background:#fff;border:1px solid var(--line);border-radius:6px">📝 ${esc(o.notes)}</p>` : ''}
       <p class="${!p.finished && isLate(o.deadline) ? 'due late' : ''}" style="text-align:left">Deadline: ${fmtDay(o.deadline)}</p>
+      ${!o.delivered ? `<div class="dl-line">🚚 ${o.delOn ? `Delivery <b>${esc(dayName(o.delOn))}</b>${o.delPlace ? ' · ' + esc(o.delPlace) : ''}${o.delNote ? ` <small>(${esc(o.delNote)})</small>` : ''}` : 'No delivery day yet'} <button class="btn sm line" data-dplan="${o.id}">${o.delOn ? 'Move' : 'Plan delivery'}</button></div>` : ''}
       <div style="margin:14px 0">${pipe(o)}</div>
       ${(() => { const use = orderUse(o); return use.length ? `<p class="section-title">Materials</p><div class="steps">${use.map(r => { const m = M(r.mat);
         return `<div class="step"><div style="flex:1"><b>${esc(m.name)}</b><div style="color:var(--muted);font-size:13px">Given ${n2(r.given)} ${esc(m.unit)}${r.normal != null ? ` · normal ${n2(r.normal)} ${esc(m.unit)}` : ''}</div></div>${r.over ? '<span class="pill p-attention">More than normal</span>' : r.normal != null ? '<span class="pill p-working">OK</span>' : ''}</div>`; }).join('')}</div>` : ''; })()}
+      <div class="ph-box"><div class="ph-head"><b>📷 Photos</b>${p.finished && !o.delivered ? '<small>Take a photo of the finished work before it leaves</small>' : ''}
+        <label class="btn sm line ph-add">＋ Add photo<input type="file" accept="image/*" capture="environment" id="phIn" hidden></label></div>
+        <div class="ph-grid" id="phGrid"><span class="ph-empty">Loading…</span></div></div>
       <p class="section-title">Steps</p>
       <div class="steps">${ts.map(t => { const [k, l] = lbl(t); const w = t.worker && W(t.worker); const plan = t.planned.map(id => W(id)?.name).filter(Boolean).join(' & '); return `<div class="step"><div style="flex:1"><b>${stageName(t.stage)}</b>${t.withPrev ? ' <span class="tog-tag">⇉ same time as above</span>' : ''}<div style="color:var(--muted);font-size:13px">${w ? esc(taskNames(t)) + (x => x ? ` · ${esc(x)} joins when free` : '')(t.planned.filter(id => !S.workers.some(v => v.id === id && v.task === t.id)).map(id => W(id)?.name).filter(Boolean).join(' & ')) : plan ? '👤 For ' + esc(plan) : 'Whoever is free'}${t.problem ? ` · ⚠ ${esc(t.problem.reason)}` : ''}</div></div><span class="pill p-${k}">${l}</span>${t.problem ? `<button class="btn sm" data-solve="${t.id}">Solved</button>` : ''}${o.delivered || t.status === 'done' ? '' : t.worker ? `<button class="btn sm line" data-give="${t.id}">Change</button>` : `<button class="btn sm line" data-plan="${t.id}">👤 ${t.planned.length ? 'Change' : 'Pick'}</button>`}</div>`; }).join('')}</div>
       ${!o.delivered && o.urgency !== 'urgent' && !p.finished ? `<p style="margin-top:14px;font-size:13px;color:var(--muted)">Customer pushing? Make it urgent and it jumps to the front of every line. No one's current job gets interrupted.</p>` : ''}
@@ -751,6 +974,8 @@
         <button class="btn line" data-x>Close</button>
       </div>`);
     const eb = $('#edOrder'); if (eb) eb.onclick = () => editOrderModal(o.id);
+    loadPhotos(o.id);
+    const phIn = $('#phIn'); if (phIn) phIn.onchange = () => { const f = phIn.files && phIn.files[0]; if (f) addPhoto(o, f); phIn.value = ''; };
     const u = $('#mkUrgent');
     if (u) u.onclick = async () => { u.disabled = true; closeModal(); await act('ws_make_urgent', { p_order: o.id }, `${o.ref} is now urgent`); };
   }
