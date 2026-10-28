@@ -401,3 +401,18 @@ body.dash .toast{border-radius:12px;background:var(--forest)}
 .pm-more{margin-top:10px}
 .pm-more summary{cursor:pointer;font-size:13px;font-weight:700;color:var(--deep,#0F3D2E)}
 @media (max-width:760px){ .sp-tog{margin-left:0} }
+
+/* tap a worker → give work */
+.w-open{display:block;text-align:left;background:none;border:0;padding:0;font:inherit;color:inherit;cursor:pointer;border-radius:12px}
+.w-open:hover .t{color:var(--deep,#0F3D2E);text-decoration:underline;text-underline-offset:3px}
+.w-give{color:var(--deep,#0F3D2E);font-weight:700}
+.w-open:disabled{cursor:default}.w-open:disabled .w-give{display:none}
+.ww-now{margin:14px 0 4px;padding:12px 14px;border-radius:14px;background:#EEF3EA;font-size:14px;line-height:1.5}
+.ww-list{display:flex;flex-direction:column;gap:8px}
+.ww-job{display:flex;gap:12px;align-items:center;border:1.5px solid var(--line,#DCE3DC);background:#fff;border-radius:16px;padding:12px 14px}
+.ww-job.pk{border-color:var(--deep,#0F3D2E);background:#FBFEF4}
+.ww-job p{margin:2px 0 0;font-size:13px;color:var(--muted,#5E6B63)}
+.ww-job .ww-st{margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.ww-act{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex:none}
+.ww-ok{font-weight:800;color:var(--deep,#0F3D2E);font-size:13px}
+@media (max-width:760px){ .ww-job{flex-direction:column;align-items:stretch} .ww-act{flex-direction:row;justify-content:flex-end} }

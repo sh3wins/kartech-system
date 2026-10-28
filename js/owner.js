@@ -336,8 +336,9 @@
 
   function viewWorkers(){
     const row = w => { const [k, l] = workerStatus(w); const t = w.task && T(w.task); const o = t && O(t.order);
-      return `<div class="item"><div class="grow"><div class="t">${esc(w.name)} <span class="pill p-${k}">${l}</span></div>
-        <div class="s">${stageName(w.stage)}${w.covers.length ? ` · also ${w.covers.map(c => stageName(c).toLowerCase()).join(', ')}` : ''}${o ? ` · on ${o.ref}` : ''}</div></div>
+      const nPlan = w.active ? S.tasks.filter(x => x.status !== 'done' && x.planned.includes(w.id) && x.worker !== w.id && O(x.order) && !O(x.order).delivered).length : 0;
+      return `<div class="item"><button class="grow w-open" data-wwork="${w.id}" ${w.active ? '' : 'disabled'}><div class="t">${esc(w.name)} <span class="pill p-${k}">${l}</span>${nPlan ? ` <span class="tog-tag">${nPlan} lined up</span>` : ''}</div>
+        <div class="s">${stageName(w.stage)}${w.covers.length ? ` · also ${w.covers.map(c => stageName(c).toLowerCase()).join(', ')}` : ''}${o ? ` · on ${o.ref}` : ''}${w.active ? ' · <span class="w-give">Give work ›</span>' : ''}</div></button>
         ${w.active ? (w.here ? `<span class="in-chip">✓ In${w.arrivedAt ? ' ' + new Date(w.arrivedAt).toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' }) : ''}</span><button class="btn sm line away-btn" data-away="${w.id}" data-v="1">Away today</button>`
           : `<button class="btn sm away-btn" data-away="${w.id}" data-v="0">Mark in</button>${w.away ? '' : `<button class="btn sm line away-btn" data-away="${w.id}" data-v="1">Away</button>`}`) : ''}
         <button class="btn sm line" data-editw="${w.id}">Edit</button></div>`; };
@@ -478,6 +479,7 @@
     if (e.target.closest('[data-steps]')) return stepsModal();
     const gv = e.target.closest('[data-give]'); if (gv) return giveModal(gv.dataset.give);
     const pl = e.target.closest('[data-plan]'); if (pl) return planModal(pl.dataset.plan);
+    const ww = e.target.closest('[data-wwork]'); if (ww && !ww.disabled) return workerWorkModal(ww.dataset.wwork);
     const aw = e.target.closest('[data-away]'); if (aw){ aw.disabled = true; const w = W(aw.dataset.away);
       return act('ws_set_away', { p_worker: aw.dataset.away, p_away: aw.dataset.v === '1' }, aw.dataset.v === '1' ? `${w ? w.name : 'Worker'} is away today` : `${w ? w.name : 'Worker'} is in`); }
     const et = e.target.closest('[data-edittool]'); if (et) return toolModal(et.dataset.edittool);
@@ -500,6 +502,48 @@
   function closeModal(){ document.querySelector('.scrim')?.remove(); }
   function openModal(html){ closeModal(); const s = document.createElement('div'); s.className = 'scrim'; s.innerHTML = `<div class="modal">${html}</div>`; s.addEventListener('click', e => { if (e.target === s || e.target.closest('[data-x]')) closeModal(); }); document.body.appendChild(s); return s; }
 
+
+  /* ---------- tap a worker → the work available for them ---------- */
+  function workerWorkModal(wid){
+    const w = W(wid); if (!w) return;
+    const fits = st => st === w.stage || (w.covers || []).includes(st);
+    const cur = w.task && T(w.task), curO = cur && O(cur.order);
+    const open = S.tasks.filter(t => (t.status === 'queued' || t.status === 'waiting') && O(t.order) && !O(t.order).delivered)
+      .sort((a, b) => (a.status === 'queued' ? 0 : 1) - (b.status === 'queued' ? 0 : 1) || URG[O(a.order).urgency] - URG[O(b.order).urgency] || O(a.order).deadline - O(b.order).deadline);
+    const mine = open.filter(t => fits(t.stage)), other = open.filter(t => !fits(t.stage));
+    const before = t => S.tasks.filter(x => x.order === t.order && x.step < t.step && x.status !== 'done').map(x => stageName(x.stage).toLowerCase());
+    const row = t => { const o = O(t.order), mineP = t.planned.includes(w.id), others = t.planned.filter(id => id !== w.id).map(id => W(id)?.name).filter(Boolean);
+      const when = t.status === 'queued' ? `<span class="pill p-waiting">Ready now${queue(t.stage).indexOf(t) >= 0 ? ' · #' + (queue(t.stage).indexOf(t) + 1) + ' in line' : ''}</span>` : `<span class="pill p-normal">Later · after ${esc(before(t).slice(-1)[0] || 'the step before')}</span>`;
+      const act = mineP ? `<span class="ww-ok">✓ For ${esc(w.name)}</span><button class="btn sm line" data-wwrm="${t.id}">Remove</button>`
+        : t.status === 'queued' && w.here && !w.task ? `<button class="btn sm" data-wwnow="${t.id}">Give now</button>`
+        : `<button class="btn sm" data-wwadd="${t.id}">${others.length === 1 ? `Add ${esc(w.name)} too` : others.length ? `Give to ${esc(w.name)} instead` : `Give to ${esc(w.name)}`}</button>`;
+      return `<div class="ww-job ${mineP ? 'pk' : ''}"><div class="grow"><b>${esc(o.ref)} · ${esc(stageName(t.stage))}</b> ${o.urgency !== 'normal' ? `<span class="pill p-${o.urgency}">${URG_NAME[o.urgency]}</span>` : ''}
+        <p>${o.qty} × ${esc(o.item)} · ${esc(o.customer)} · due ${fmtDay(o.deadline)}</p>
+        <p class="ww-st">${when}${others.length ? ` <small>👤 ${esc(others.join(' & '))}</small>` : ''}</p></div><div class="ww-act">${act}</div></div>`; };
+    const s = openModal(`
+      <div style="display:flex;justify-content:space-between;align-items:start;gap:10px"><div><h2 style="margin:0">${esc(w.name)}</h2>
+        <p class="sub" style="margin:2px 0 0">${esc(stageName(w.stage))}${w.covers.length ? ' · also ' + w.covers.map(c => stageName(c).toLowerCase()).join(', ') : ''}</p></div>
+        ${w.here ? `<span class="in-chip">✓ In${w.arrivedAt ? ' ' + new Date(w.arrivedAt).toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' }) : ''}</span>` : `<span class="pill p-normal">${w.away ? 'Away today' : 'Not in yet'}</span>`}</div>
+      <div class="ww-now">${cur && curO ? `<b>Now:</b> ${esc(curO.ref)} · ${esc(stageName(cur.stage))} · ${curO.qty} × ${esc(curO.item)} <span class="pill p-${cur.status === 'working' ? 'working' : 'notstarted'}">${cur.status === 'working' ? 'Working' : 'Not started'}</span>`
+        : w.here ? `<b>Free right now.</b> Give him a job that is ready and it shows on the workshop screen straight away.` : `<b>Not in yet.</b> Work you give ${esc(w.name)} starts when the foreman ticks him in.`}</div>
+      <p class="section-title">${esc(stageName(w.stage))} work${mine.length ? ` <span class="grp-tag">${mine.length}</span>` : ''}</p>
+      <div class="ww-list">${mine.map(row).join('') || '<p class="empty" style="padding:10px">No work waiting for this step.</p>'}</div>
+      ${other.length ? `<details class="pm-more"><summary>Other steps (${other.length}): if ${esc(w.name)} is stepping up</summary><div class="ww-list">${other.map(row).join('')}</div></details>` : ''}
+      <p class="hint-sm">Jobs you give him line up in order: when he finishes one, the next shows on his screen. Busy? It waits for him.</p>
+      <p id="wwErr" class="ferr"></p>
+      <div class="actions"><button class="btn line" data-x>Close</button></div>`);
+    s.addEventListener('click', async e => {
+      const b = e.target.closest('[data-wwnow],[data-wwadd],[data-wwrm]'); if (!b) return; b.disabled = true;
+      const t = T(b.dataset.wwnow || b.dataset.wwadd || b.dataset.wwrm); if (!t) return;
+      let r;
+      if (b.dataset.wwnow){ r = await db.rpc('ws_plan_step', { p_task: t.id, p_people: [w.id] }); if (!r.error && !T(t.id)?.worker) r = await db.rpc('ws_give_task', { p_task: t.id, p_worker: w.id }); }
+      else if (b.dataset.wwrm) r = await db.rpc('ws_plan_step', { p_task: t.id, p_people: t.planned.filter(id => id !== w.id) });
+      else { const keep = t.planned.filter(id => id !== w.id); r = await db.rpc('ws_plan_step', { p_task: t.id, p_people: keep.length === 1 ? [keep[0], w.id] : [w.id] }); }
+      if (r.error && !/already|busy/i.test(errMsg(r.error))){ b.disabled = false; s.querySelector('#wwErr').textContent = /ws_plan_step/.test(errMsg(r.error)) ? 'Run update-11-together.sql in Supabase first.' : errMsg(r.error); return; }
+      const o = O(t.order); toast(b.dataset.wwrm ? `Removed from ${o.ref}` : `${o.ref} · ${stageName(t.stage)} → ${w.name}`);
+      await load(); workerWorkModal(w.id);
+    });
+  }
 
   /* ---------- pick who does one step (any time, even before it's ready) ---------- */
   function planModal(taskId){
