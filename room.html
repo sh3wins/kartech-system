@@ -63,6 +63,19 @@
   .toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%) translateY(20px);opacity:0;background:var(--forest);color:#fff;padding:12px 18px;border-radius:14px;font-size:14px;transition:all .25s;pointer-events:none;z-index:60;max-width:90vw;text-align:center}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
   .center{text-align:center;padding:40px 10px}
+  .nowline{margin-top:6px;font-size:14px;font-weight:600;color:var(--forest)}
+  .todo{display:flex;flex-direction:column;gap:12px}
+  .todo h3{font-family:'Archivo',sans-serif;font-size:21px;line-height:1.2}
+  .todo p{font-size:15px;line-height:1.45;color:var(--ink);margin-top:-4px}
+  .todo.ask{background:#FFF7E6;border:1.5px solid #EBCB8B}
+  .todo.pay{border:2px solid var(--leaf)}
+  .todo.wait{background:#FFF7E6}
+  .todo.done{background:var(--soft)} .todo.done h3{color:var(--forest)}
+  .dots{list-style:none;display:flex;gap:6px;font-size:12px;color:var(--muted)}
+  .dots li{flex:1;display:flex;flex-direction:column;gap:5px}
+  .dots li::before{content:"";height:5px;border-radius:3px;background:var(--line)}
+  .dots li.done::before{background:var(--leaf)} .dots li.now::before{background:#D9A441}
+  .dots li.done,.dots li.now{color:var(--ink);font-weight:600}
   .pay{display:flex;flex-direction:column;gap:12px}
   .pay-h{display:flex;justify-content:space-between;align-items:center}
   .pay-h b{font-family:'Archivo',sans-serif;font-size:17px}
@@ -110,23 +123,28 @@
 <script src="js/config.js?v=3"></script>
 <script>
 (function(){
-  const code = (new URLSearchParams(location.search).get('c') || '').trim().toLowerCase();
+  // the order code comes from the link/QR; if there is none, the client types their phone number
+  const KEY = 'kartech-room';
+  let code = (new URLSearchParams(location.search).get('c') || '').trim().toLowerCase();
+  const fresh = new URLSearchParams(location.search).has('find');
+  if (!code && !fresh){ try { code = localStorage.getItem(KEY) || ''; } catch(e){} }
   const v = $('#view');
-  let R = null, busy = false, lastJson = '';
+  let R = null, busy = false, lastJson = '', toMsgs = false;
   const pub = p => db.storage.from('room-files').getPublicUrl(p).data.publicUrl;
   const when = t => new Date(t).toLocaleString('en-GB', { weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
   const day = t => new Date(t).toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short' });
   const tick = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2E6B45" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>';
 
   if (!db){ v.innerHTML = '<div class="card center"><h1>Not available</h1><p class="sub">Please try again later.</p></div>'; return; }
-  if (!code){ v.innerHTML = '<div class="card center"><h1>Your order room</h1><p class="sub">Open the link Kartech sent you, or scan the code in the shop.</p></div>'; return; }
+  if (!code) return findPage();
 
   async function load(){
     if (busy) return; busy = true;
     try {
       const { data, error } = await db.rpc('ws_room', { p_code: code });
       if (error) throw error;
-      if (!data){ v.innerHTML = '<div class="card center"><h1>We could not find this order</h1><p class="sub">Check the link Kartech sent you, or ask us for a new one.</p></div>'; return; }
+      if (!data){ try { localStorage.removeItem(KEY); } catch(e){} return findPage('We could not find that order. Type your phone number instead.'); }
+      try { localStorage.setItem(KEY, code); } catch(e){}
       const j = JSON.stringify(data); if (j === lastJson) return; lastJson = j; R = data; render();
     } catch(e){ if (!R) v.innerHTML = '<div class="card center"><h1>No connection</h1><p class="sub">Check your internet. We will try again.</p></div>'; }
     finally { busy = false; }
@@ -134,24 +152,18 @@
 
   function render(){
     const steps = R.steps || [], cur = steps.find(s => s.status !== 'done'), allDone = steps.length && !cur;
-    const status = R.delivered ? 'Delivered. Thank you!' : allDone ? 'Ready ✓' : cur ? (cur.status === 'working' ? 'Now: ' : 'Next: ') + cur.name : 'Getting ready';
+    const started = steps.some(s => s.status !== 'waiting');
+    const status = R.delivered ? '✓ Delivered' : allDone ? '✓ Ready' : !started ? 'Not started yet' : cur ? 'Now: ' + cur.name : 'Getting ready';
     v.innerHTML = `
       <section class="card">
         <span class="k">ORDER ${esc(R.ref)}</span>
         <h1>${R.qty} × ${esc(R.item)}</h1>
         <span class="sub">${R.name ? esc(R.name) + ' · ' : ''}Ready by ${esc(day(R.deadline + 'T12:00'))}${R.delivery_on ? ' · Delivery ' + esc(day(R.delivery_on + 'T12:00')) : ''}</span>
         <div class="bar">${steps.map(s => `<i class="${s.status}" title="${esc(s.name)}"></i>`).join('')}</div>
-        <div class="barlab"><span>${esc(steps[0] ? steps[0].name : '')}</span><b>${esc(status)}</b><span>Ready</span></div>
-        ${R.approved_at ? `<div class="ok">${tick}<span><b>You approved the design</b> · ${esc(day(R.approved_at))}</span></div>` : ''}
+        <p class="nowline">${esc(status)}</p>
       </section>
 
-      ${payCard()}
-
-      ${R.approved_at || R.delivered ? '' : `<section class="card ask">
-        <b style="font-family:'Archivo',sans-serif;font-size:17px">Check your design</b>
-        <p>Before we start, make sure we have it exactly right: the photos and the details. Then tap approve.</p>
-        <button class="btn green" id="reviewBtn">Review and approve</button>
-      </section>`}
+      ${todoCard()}
 
       <h2>Your pictures</h2>
       <div class="pics">${(R.photos || []).map((p, i) => `<button class="pic" data-pic="${i}" aria-label="Open picture ${i + 1}"><img src="${esc(pub(p.path))}" alt="" loading="lazy"></button>`).join('')}
@@ -160,18 +172,65 @@
 
       <h2>Messages</h2>
       <div class="msgs" id="msgs">${(R.msgs || []).length ? R.msgs.map(m => `<div class="msg ${m.who === 'customer' ? 'me' : 'them'}">${esc(m.text)}<small>${m.who === 'customer' ? 'You' : 'Kartech'} · ${esc(when(m.at))}</small></div>`).join('')
-        : '<p class="empty">Ask anything or tell us a detail. Kartech will reply here.</p>'}</div>`;
+        : '<p class="empty">Ask anything or tell us a detail. Kartech will reply here.</p>'}</div>
+      <button class="linkb" id="otherOrder" style="align-self:center;margin-top:6px">Not your order? See another order</button>`;
     $('#composer').classList.remove('hidden');
     const rb = $('#reviewBtn'); if (rb) rb.onclick = review;
     v.querySelectorAll('[data-paid]').forEach(b => b.onclick = () => paidSheet(b.dataset.paid));
     const cp = $('#copyNum'); if (cp) cp.onclick = async () => { try { await navigator.clipboard.writeText(cp.dataset.n); toast('Number copied'); } catch(e){ toast(cp.dataset.n); } };
     $('#addTile').onclick = () => $('#photoIn').click();
+    $('#otherOrder').onclick = () => { try { localStorage.removeItem(KEY); } catch(e){} location.href = location.pathname + '?find'; };
     v.querySelectorAll('[data-pic]').forEach(b => b.onclick = () => full(+b.dataset.pic));
-    const ms = $('#msgs'); if (ms && ms.lastElementChild) ms.lastElementChild.scrollIntoView({ block:'nearest' });
+    const ms = $('#msgs'); if (toMsgs && ms && ms.lastElementChild){ toMsgs = false; ms.lastElementChild.scrollIntoView({ block:'nearest' }); }
   }
 
   // ---------- payment: steps only, the amounts are on the invoice ----------
   const niceNum = p => String(p || '').replace(/^\+?254/, '0').replace(/^(\d{4})(\d{3})(\d{3})$/, '$1 $2 $3');
+  // ---------- no link? find the order with the phone number ----------
+  function findPage(msg){
+    $('#composer').classList.add('hidden');
+    v.innerHTML = `<section class="card find">
+        <span class="k">YOUR KARTECH ORDER</span>
+        <h1>See your order</h1>
+        <p class="sub" style="font-size:15px">Type the phone number you gave Kartech.</p>
+        <form id="findForm" class="find-f">
+          <input id="findPh" class="code-in" inputmode="tel" autocomplete="tel" placeholder="0712 345 678" style="letter-spacing:.04em;font-family:inherit">
+          <button class="btn">Show my order</button>
+        </form>
+        <p class="sub" id="findErr" style="color:var(--red);min-height:18px">${esc(msg || '')}</p>
+        <div id="findList"></div>
+      </section>`;
+    const inp = $('#findPh'); setTimeout(() => inp.focus(), 60);
+    $('#findForm').onsubmit = async e => { e.preventDefault();
+      const btn = e.target.querySelector('button'); btn.disabled = true; $('#findErr').textContent = '';
+      const { data, error } = await db.rpc('ws_find_rooms', { p_phone: inp.value });
+      btn.disabled = false;
+      if (error) return $('#findErr').textContent = errMsg(error);
+      const list = data || [];
+      if (!list.length) return $('#findErr').textContent = 'No order found for this number. Check the number, or call Kartech.';
+      if (list.length === 1) return go(list[0].code);
+      $('#findList').innerHTML = `<p class="sub" style="margin:4px 0 8px">You have ${list.length} orders. Tap one:</p>` +
+        list.map(o => `<button class="btn line pick" data-code="${esc(o.code)}" style="justify-content:space-between;margin-bottom:8px"><span><b>${o.qty} × ${esc(o.item)}</b></span><span class="sub">${esc(o.ref)}${o.delivered ? ' · delivered' : ''}</span></button>`).join('');
+      v.querySelectorAll('[data-code]').forEach(b => b.onclick = () => go(b.dataset.code));
+    };
+  }
+  function go(c){ location.href = location.pathname + '?c=' + encodeURIComponent(c); }
+
+  // ONE card: only the next thing the client has to do
+  function todoCard(){
+    const p = R.pay, okHalf = p && p.dep_ok, okAll = p && p.paid;
+    const dots = p ? `<ol class="dots"><li class="${R.approved_at ? 'done' : 'now'}">Approve</li><li class="${okHalf ? 'done' : R.approved_at ? 'now' : ''}">Pay half</li><li class="${okAll ? 'done' : okHalf ? 'now' : ''}">Pay the rest</li></ol>` : '';
+    const where = p && p.phone ? `<div class="payto"><div><small>M-Pesa · Send money to</small><b>${esc(niceNum(p.phone))}</b><span>${esc(p.to || '')}</span></div><button class="copy" id="copyNum" data-n="${esc(niceNum(p.phone).replace(/\s/g, ''))}">Copy</button></div>` : '';
+    const card = (cls, title, text, extra) => `<section class="card todo ${cls}">${dots}<h3>${title}</h3>${text ? `<p>${text}</p>` : ''}${extra || ''}</section>`;
+    if (R.delivered) return card('done', '✓ Delivered', 'Thank you for choosing Kartech!');
+    if (!R.approved_at) return card('ask', 'Check your design', 'Is everything right? Have a look before we start.', '<button class="btn green" id="reviewBtn">Check and approve</button>');
+    if (p && p.invoice && !okHalf && !p.dep_claimed && !p.bal_claimed) return card('pay', 'Pay half to start', 'Your invoice is on WhatsApp. When you have paid, tap the button.',
+      where + '<button class="btn" data-paid="half">I\'ve paid half</button><button class="linkb" data-paid="full">Paid everything? Tap here</button>');
+    if (p && (p.dep_claimed && !okHalf || p.bal_claimed && !okAll)) return card('wait', '⏳ Checking your payment', 'We will show ✓ here soon. You don\'t need to do anything.');
+    if (okHalf && !okAll) return card('pay', 'Pay the rest before delivery', 'Half is paid, thank you! When you have paid the rest, tap the button.',
+      where + '<button class="btn" data-paid="full">I\'ve paid the rest</button>');
+    return card('done', '✓ Nothing to do now', okAll ? 'Fully paid, thank you! We will tell you the delivery day here.' : 'We are making your order. Any question? Write to us below.');
+  }
   function payCard(){
     const p = R.pay; if (!p || !p.invoice && !p.dep_ok && !p.paid) return '';
     const st = (on, now, label) => `<li class="${on ? 'done' : now ? 'now' : ''}"><i></i>${label}</li>`;
@@ -195,8 +254,8 @@
     const what = part === 'half' ? 'half' : R.pay && R.pay.dep_ok ? 'the rest' : 'it all';
     s.innerHTML = `<div>
       <span class="k">${esc(R.ref)} · PAYMENT</span>
-      <h1 style="font-size:24px">You paid ${what}?</h1>
-      <p class="sub">Type the code from your M-Pesa SMS. It looks like <b>SJK7XQ2M4P</b>. Kartech checks it and confirms here.</p>
+      <h1 style="font-size:24px">Great! One last thing</h1>
+      <p class="sub">Type the code from your M-Pesa SMS (it looks like <b>SJK7XQ2M4P</b>).</p>
       <input class="code-in" id="txn" maxlength="14" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="M-Pesa code">
       <p class="sub" id="txnErr" style="color:var(--red);min-height:18px"></p>
       <button class="btn green" id="txnGo">Send to Kartech</button>
@@ -280,7 +339,7 @@
     e.preventDefault(); const t = mi.value.trim(); if (!t) return;
     const { error } = await db.rpc('ws_room_message', { p_code: code, p_text: t });
     if (error) return toast(errMsg(error));
-    mi.value = ''; mi.style.height = 'auto'; lastJson = ''; load();
+    mi.value = ''; mi.style.height = 'auto'; lastJson = ''; toMsgs = true; load();
   });
 
   load();

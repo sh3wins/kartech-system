@@ -161,6 +161,12 @@ grant execute on function public.ws_room_unapprove(uuid)          to authenticat
 grant execute on function public.ws_foreman_room_code(text, uuid) to authenticated;
 grant execute on function public.ws_my_job(uuid)                  to authenticated;
 
+create or replace function public.ws_room_ok(p_code text) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.ws_orders where room_code = lower(trim(p_code)));
+$$;
+grant execute on function public.ws_room_ok(text) to anon, authenticated;
+
 -- ---------- the customers' photo store (secret addresses, no listing) ----------
 do $do$
 begin
@@ -178,7 +184,7 @@ begin
     -- (the room code + a random file name), which only that room knows.
     create policy "room files customer add" on storage.objects for insert to anon, authenticated
       with check (bucket_id = 'room-files' and (storage.foldername(name))[1] = 'room'
-                  and exists (select 1 from public.ws_orders o where o.room_code = (storage.foldername(name))[2]));
+                  and public.ws_room_ok((storage.foldername(name))[2]));
     create policy "room files owner read" on storage.objects for select to authenticated
       using (bucket_id = 'room-files' and public.is_admin());
   end if;
