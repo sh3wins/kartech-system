@@ -131,7 +131,7 @@
           : w.away ? 'Away today' : esc(stageName(w.stage)) + ' · tap when they arrive'}</small></span></button>`; };
       v.innerHTML = head('Manager', 'When a worker walks in, tap their name. Their tools pop up. Tick what they take.') + `
         <button class="tc-banner anim ${checkNeeded() ? 'due' : ''}" id="fmCheck" style="--i:1"><span>🔧</span><span><b>${d.done_today ? 'Tool check done for today ✓' : 'Evening tool check'}</b><small>${out.length ? out.length + ' tool' + (out.length > 1 ? 's' : '') + ' out right now' : 'All tools are in'}</small></span></button>
-        <div class="fm-adds anim" style="--i:1"><button class="fm-add sale" id="fmNewOrder">＋ New order <small>(customer in the shop)</small></button><button class="fm-add" id="fmAddW">＋ Add a new worker</button></div>
+        <div class="fm-adds anim" style="--i:1"><button class="fm-add sale" id="fmNewOrder">＋ New order <small>(customer in the shop)</small></button><button class="fm-add" id="fmLinks">🔗 Client links <small>(send a client their order page)</small></button><button class="fm-add" id="fmAddW">＋ Add a new worker</button></div>
         ${notIn.length ? `<div class="st-group anim" style="--i:2"><h4>Not in yet · ${notIn.length}</h4><div class="names">${notIn.map(card).join('')}</div></div>` : ''}
         ${inn.length ? `<div class="st-group anim" style="--i:3"><h4>In today · ${inn.length}</h4><div class="names">${inn.map(card).join('')}</div></div>` : ''}`;
       return;
@@ -156,17 +156,35 @@
       return;
     }
     if (fm.view === 'qr' && fm.qr){
-      v.innerHTML = head('Give this to the customer', `Order ${esc(fm.qr.ref)} is saved. This is the customer's own Order Room.`, false) + `
+      const q = fm.qr;
+      v.innerHTML = head(q.isNew ? 'Give this to the customer' : 'Client link · ' + esc(q.ref), q.isNew ? `Order ${esc(q.ref)} is saved. This is the customer's own Order Room.` : `${esc(q.item)} · ${esc(q.customer)}`, !q.isNew) + `
         <div class="qr-wrap anim" style="--i:1">
-          <div class="qr-big">${fm.qr.svg || '<p class="muted">Making the code…</p>'}</div>
+          <div class="qr-big">${q.svg || '<p class="muted">Making the code…</p>'}</div>
           <div class="qr-how">
-            <h3>Customer: scan this with your phone camera</h3>
+            <h3>Customer here? Scan this with your phone camera</h3>
             <ol><li>Open your phone camera</li><li>Point it at the code</li><li>Tap the link that appears</li></ol>
-            <p class="muted">In their Order Room they can send photos, write to Kartech and approve the design. Keep the page: the link works any time.</p>
-            <p class="qr-link">${esc(fm.qr.link)}</p>
+            <p class="muted">Customer not here? Send it to them with a button below. In their Order Room they can send photos, write to Kartech and approve the design.</p>
+            <p class="qr-link">${esc(q.link)}</p>
           </div>
         </div>
-        <button class="giant go anim" id="qrDone" style="--i:2">✓ Done</button>`;
+        <div class="qr-send anim" style="--i:2">
+          <a class="btn line big" target="_blank" rel="noopener" href="${esc(KQR.wa(q))}">💬 WhatsApp the link</a>
+          <button class="btn line big" id="qrPic">📷 Send as picture</button>
+          <button class="btn line big" id="qrCopy">Copy link</button>
+        </div>
+        <button class="giant go anim" id="qrDone" style="--i:3">✓ Done</button>`;
+      return;
+    }
+    if (fm.view === 'links'){
+      const all = fm.links || [], f = (fm.lq || '').trim().toLowerCase();
+      const list = f ? all.filter(o => (o.ref + ' ' + o.customer + ' ' + o.item).toLowerCase().includes(f)) : all;
+      v.innerHTML = head('Client links', 'Each client has their own private order page. Send it on WhatsApp, as a picture, or let them scan the code.', true) + `
+        <input class="fm-in cl-search anim" id="clFind" value="${esc(fm.lq || '')}" placeholder="🔍 Find a client, order number or item" autocomplete="off" style="--i:1">
+        <div class="cl-list anim" style="--i:2">${list.map(o => `<div class="cl-row">
+            <div class="cl-txt"><div class="cl-top"><b>${esc(o.ref)}</b>${o.approved ? '<em class="cl-ok">✓ Approved</em>' : ''}</div><span>${esc(o.qty + ' × ' + o.item)} · ${esc(o.customer)}</span></div>
+            <div class="cl-acts"><button class="btn line" data-lqr="${o.id}">QR</button><a class="btn line" target="_blank" rel="noopener" href="${esc(KQR.wa({ ref: o.ref, customer: o.customer, notes: o.notes, link: roomUrl(o.room) }))}">💬 WhatsApp</a><button class="btn line" data-lpic="${o.id}">📷 Picture</button><button class="btn line" data-lcopy="${o.id}">Copy</button></div>
+          </div>`).join('') || `<p class="muted">${f ? 'No order matches.' : 'No open orders.'}</p>`}</div>`;
+      const inp = $('#clFind'); inp.addEventListener('input', () => { fm.lq = inp.value; fmIdle(); const pos = inp.selectionStart; renderForeman(); const n = $('#clFind'); n.focus(); n.setSelectionRange(pos, pos); });
       return;
     }
     if (fm.view === 'neworder'){
@@ -229,6 +247,7 @@
     if (b.id === 'fmExit') return fmClose();
     if (b.id === 'fmBack' && fm.view === 'neworder'){ fm.no = null; fm.view = 'home'; return renderForeman(); }
     if (b.id === 'fmBack' && fm.view === 'wedit' && fm.ed && fm.ed.id){ fm.view = 'worker'; return renderForeman(); }
+    if (b.id === 'fmBack' && fm.view === 'qr'){ const back = (fm.qr && fm.qr.back) || 'home'; fm.qr = null; fm.view = back; return renderForeman(); }
     if (b.id === 'fmBack'){ fm.view = 'home'; fm.pick = null; await fmLoad(); return renderForeman(); }
     if (b.id === 'fmNewOrder'){ const d = new Date(); d.setDate(d.getDate() + 7);
       fm.no = { customer:'', phone:'', item:'', qty:'1', deadline: d.toLocaleDateString('en-CA'), urgency:'normal', notes:'', files:[], stages: STAGES.map(x => x.id), err:'' }; fm.view = 'neworder'; return renderForeman(); }
@@ -240,6 +259,7 @@
       if (!n.stages.length){ n.err = 'Keep at least one step.'; return renderForeman(); }
       b.disabled = true; b.textContent = 'Adding…';
       const notes = [n.notes.trim(), n.phone.trim() ? 'Phone: ' + n.phone.trim() : ''].filter(Boolean).join(' · ');
+      const sv = { qty: n.qty, item: n.item.trim(), customer: n.customer.trim(), notes };
       const { data, error } = await db.rpc('ws_foreman_create_order', { p_pin: fm.pin, p: { customer: n.customer.trim(), item: n.item.trim(), qty: Math.max(1, parseInt(n.qty, 10) || 1), deadline: n.deadline || null, urgency: n.urgency, notes, stages: n.stages } });
       if (error){ n.err = /ws_foreman_create_order/.test(errMsg(error)) ? 'The owner needs to run update-15-sales.sql in Supabase first.' : errMsg(error); return renderForeman(); }
       let bad = 0;
@@ -251,11 +271,20 @@
       toast(`${data.ref} added ✓ The owner has been told.${bad ? ` ${bad} picture${bad > 1 ? 's' : ''} did not upload.` : ''}`);
       const rc = await db.rpc('ws_foreman_room_code', { p_pin: fm.pin, p_order: data.id });
       fm.no = null; await fmLoad();
-      if (!rc.error && rc.data){ fm.qr = { ref: data.ref, link: new URL('room.html?c=' + rc.data, location.href).href, svg: '' }; fm.view = 'qr'; renderForeman();
-        try { const q = (await loadQR())(0, 'M'); q.addData(fm.qr.link); q.make(); fm.qr.svg = q.createSvgTag({ cellSize: 8, margin: 3, scalable: true }); } catch(e){ fm.qr.svg = '<p class="muted">Could not make the code. Give the customer the link below.</p>'; }
-        return renderForeman(); }
+      if (!rc.error && rc.data) return fmShowQR({ ref: data.ref, qty: Math.max(1, parseInt(sv.qty, 10) || 1), item: sv.item, customer: sv.customer, notes: sv.notes, room: rc.data }, 'home');
       fm.view = 'home'; return renderForeman(); }
-    if (b.id === 'qrDone'){ fm.qr = null; fm.view = 'home'; return renderForeman(); }
+    if (b.id === 'qrDone'){ const back = (fm.qr && fm.qr.back) || 'home'; fm.qr = null; fm.view = back; return renderForeman(); }
+    if (b.id === 'qrPic') return fmSendPic(fm.qr, b);
+    if (b.id === 'qrCopy') return fmCopy(fm.qr.link);
+    if (b.id === 'fmLinks'){ b.disabled = true;
+      const { data, error } = await db.rpc('ws_foreman_rooms', { p_pin: fm.pin });
+      b.disabled = false;
+      if (error){ toast(/ws_foreman_rooms/.test(errMsg(error)) ? 'The owner needs to run update-17-client-links.sql in Supabase first.' : errMsg(error)); return; }
+      fm.links = data || []; fm.lq = ''; fm.view = 'links'; return renderForeman(); }
+    const lo = id => (fm.links || []).find(o => o.id === id);
+    if (b.dataset.lqr){ const o = lo(b.dataset.lqr); if (o) return fmShowQR(o, 'links'); return; }
+    if (b.dataset.lpic){ const o = lo(b.dataset.lpic); if (o) return fmSendPic({ ref: o.ref, item: `${o.qty} × ${o.item}`, customer: o.customer, link: roomUrl(o.room) }, b); return; }
+    if (b.dataset.lcopy){ const o = lo(b.dataset.lcopy); if (o) return fmCopy(roomUrl(o.room)); return; }
     if (b.id === 'fmAddW'){ fm.ed = { id:null, name:'', stage:null, covers:[] }; fm.view = 'wedit'; return renderForeman(); }
     if (b.id === 'fmEditW'){ const w = fmW(fm.wid); if (!w) return; fm.ed = { id:w.id, orig:w.name, name:w.name, stage:w.stage, covers:(w.covers || []).slice(), busy: !!w.job }; fm.view = 'wedit'; return renderForeman(); }
     if (b.dataset.fmain){ fm.ed.stage = b.dataset.fmain; fm.ed.covers = fm.ed.covers.filter(x => x !== b.dataset.fmain); return renderForeman(); }
@@ -440,10 +469,26 @@
       img.onerror = () => { URL.revokeObjectURL(url); no(new Error('That file is not a picture')); }; img.src = url; });
   }
 
-  let qrLib = null;
-  function loadQR(){ return qrLib || (qrLib = new Promise((ok, no) => { if (window.qrcode) return ok(window.qrcode);
-    const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
-    sc.onload = () => ok(window.qrcode); sc.onerror = () => { qrLib = null; no(new Error('qr')); }; document.head.appendChild(sc); })); }
+  const loadQR = () => KQR.load();
+  const roomUrl = code => new URL('room.html?c=' + code, location.href).href;
+  // show the QR page for one order (after a sale, or from "Client links")
+  async function fmShowQR(o, back){
+    fm.qr = { ref: o.ref, item: `${o.qty} × ${o.item}`, customer: o.customer, notes: o.notes || '', link: roomUrl(o.room), svg: '', back, isNew: back === 'home' };
+    fm.view = 'qr'; renderForeman();
+    try { const q = await KQR.make(fm.qr.link); fm.qr.svg = q.createSvgTag({ cellSize: 8, margin: 3, scalable: true }); }
+    catch(e){ fm.qr.svg = '<p class="muted">Could not make the code. Send the client the link instead.</p>'; }
+    if (fm && fm.view === 'qr') renderForeman();
+  }
+  async function fmSendPic(info, btn){
+    const was = btn.textContent; btn.disabled = true; btn.textContent = 'Making picture…';
+    try { const r = await KQR.share(info); if (r === 'saved') toast('Picture saved to Downloads. Send it on WhatsApp or print it.'); else if (r === 'shared') toast('Picture sent ✓'); }
+    catch(e){ toast(errMsg(e)); }
+    btn.disabled = false; btn.textContent = was;
+  }
+  async function fmCopy(link){
+    try { await navigator.clipboard.writeText(link); toast('Link copied. Paste it in WhatsApp or SMS.'); }
+    catch(e){ prompt('Copy this link:', link); }
+  }
 
   /* ---------- idle sign-out ---------- */
   function resetIdle(){

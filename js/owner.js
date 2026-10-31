@@ -182,6 +182,8 @@
   }
   /* ---------- DASHBOARD ---------- */
   let enter = true, prevStats = {}, seenAtt = null, orderFilter = null;
+  let orderSrc = 'all'; try { orderSrc = localStorage.getItem('kt-osrc') || 'all'; } catch (e) {}
+  const srcOf = o => (o.srcNo || o.reqId) ? 'online' : 'shop';
   const orderHealth = o => { const p = orderProgress(o);
     if (p.finished) return ['ready', 'Ready'];
     if (isLate(o.deadline)) return ['late', 'Late'];
@@ -293,29 +295,37 @@
     const boxes = [...b.closest('.sg').querySelectorAll('input[type=checkbox]')]; const on = !boxes.every(x => x.checked); boxes.forEach(x => x.checked = on); });
 
   function viewOrders(){
-    const active = S.orders.filter(o => !o.delivered)
+    const bySrc = o => orderSrc === 'all' || srcOf(o) === orderSrc;
+    const openAll = S.orders.filter(o => !o.delivered);
+    const nOnline = openAll.filter(o => srcOf(o) === 'online').length, nShop = openAll.length - nOnline;
+    const active = openAll.filter(bySrc)
       .filter(o => orderFilter === 'late' ? !orderProgress(o).finished && isLate(o.deadline) : orderFilter === 'urgent' ? !orderProgress(o).finished && o.urgency === 'urgent' : true)
       .sort((a,b) => URG[a.urgency] - URG[b.urgency] || a.deadline - b.deadline);
-    const delivered = S.orders.filter(o => o.delivered);
+    const delivered = S.orders.filter(o => o.delivered).filter(bySrc);
     const row = o => { const p = orderProgress(o); const late = !p.finished && isLate(o.deadline);
       return `<button class="order" data-open="${o.id}">
         <div><div class="ref">${o.ref} <span class="pill p-${o.urgency}">${URG_NAME[o.urgency]}</span>${o.srcNo ? ` <span class="pill p-web">🌐 ${esc(o.srcNo)}</span>` : ''}${o.by === 'manager' ? ' <span class="pill p-mgr">👤 Manager</span>' : ''}${o.reqId ? ' <span class="pill p-web">📝 Quote</span>' : ''}${o.approvedAt ? ' <span class="pill p-done">✓ Approved</span>' : ''}</div><div style="color:var(--muted);font-size:13px">${o.qty} × ${esc(o.item)} · ${esc(o.customer)}</div></div>
         ${pipe(o)}
         <div class="due ${late && !o.delivered ? 'late' : ''}">${o.delivered ? 'Delivered' : p.finished ? '<span class="pill p-done">Ready</span>' : 'Due ' + fmtDay(o.deadline)}</div>
       </button>`; };
-    const web = waitingWeb();
+    const web = orderSrc === 'shop' ? [] : waitingWeb();
+    const waitingIn = waitingWeb().length + (S.reqs || []).length;
+    const srcTab = (id, label, n, hint) => `<button class="src-tab ${orderSrc === id ? 'on' : ''}" data-osrc="${id}"><b>${label}</b>${n != null ? `<span>${n}</span>` : ''}${hint ? `<small>${hint}</small>` : ''}</button>`;
+    const srcTabs = `<div class="src-tabs">${srcTab('online', '🌐 From clients', nOnline + waitingIn, waitingIn ? `${waitingIn} waiting for you` : 'Website orders, quotes & photos')}${srcTab('shop', '🏪 In the shop', nShop, 'Made by you or the manager')}${srcTab('all', 'All', openAll.length, '')}</div>`;
+    const emptyMsg = orderFilter ? 'None right now. ✓' : orderSrc === 'online' ? 'No open orders from clients.' : orderSrc === 'shop' ? 'No open shop orders. Tap <b>+ New order</b> to add one.' : 'No open orders. Tap <b>+ New order</b> to add one.';
     return `
+      ${srcTabs}
       ${web.length ? `<div class="webbox"><p class="section-title" style="margin-top:0">🌐 New from the website · ${web.length}</p>
         <div class="list">${web.map(w => `<button class="order webrow" data-web="${w.id}">
           <div><div class="ref">${esc(w.order_no)}</div><div style="color:var(--muted);font-size:13px">${esc(w.customer_name)} · ${ago(new Date(w.created_at).getTime())}</div></div>
           <div class="webitems">${(w.items || []).map(i => `${i.qty} × ${esc(i.name)}`).join('<br>')}</div>
           <span class="btn sm">Send to workshop</span></button>`).join('')}</div></div>` : ''}
-      ${orderFilter ? '' : requestsBox()}
+      ${orderFilter || orderSrc === 'shop' ? '' : requestsBox()}
       ${orderFilter ? '' : deliveriesPanel()}
-      <h2>Orders</h2>
+      <h2>${orderSrc === 'online' ? 'Orders from clients' : orderSrc === 'shop' ? 'Shop orders' : 'Orders'}</h2>
       <p class="sub">Most urgent first. Tap an order to see who's on it.</p>
       ${orderFilter ? `<p class="filter">Showing only <b>${orderFilter}</b> orders <button id="clearFilter">Show all ✕</button></p>` : ''}
-      <div class="list">${active.length ? active.map(row).join('') : `<p class="empty">${orderFilter ? 'None right now. ✓' : 'No open orders. Tap <b>+ New order</b> to add one.'}</p>`}</div>
+      <div class="list">${active.length ? active.map(row).join('') : `<p class="empty">${emptyMsg}</p>`}</div>
       ${delivered.length && !orderFilter ? `<p class="section-title">Delivered (last 30 days)</p><div class="list">${delivered.map(row).join('')}</div>` : ''}`;
   }
 
@@ -625,6 +635,7 @@
     const pl = e.target.closest('[data-plan]'); if (pl) return planModal(pl.dataset.plan);
     const rqb = e.target.closest('[data-req]'); if (rqb) return requestModal(rqb.dataset.req);
     const rc = e.target.closest('[data-rcopy]'); if (rc){ const o = O(rc.dataset.rcopy); try { await navigator.clipboard.writeText(roomLink(o)); toast('Link copied. Paste it in WhatsApp or SMS.'); } catch(x){ prompt('Copy this link:', roomLink(o)); } return; }
+    const rpic = e.target.closest('[data-rpic]'); if (rpic && !rpic.disabled) return sendPic(O(rpic.dataset.rpic), rpic);
     const rqr = e.target.closest('[data-rqr]'); if (rqr) return qrModal(O(rqr.dataset.rqr));
     const ru = e.target.closest('[data-runap]'); if (ru){ const { error } = await db.rpc('ws_room_unapprove', { p_order: ru.dataset.runap }); if (error) return toast(errMsg(error)); toast('Approval removed. Ask the customer to approve again.'); await load(); return orderModal(ru.dataset.runap); }
     const dp = e.target.closest('[data-dplan]'); if (dp) return deliveryModal(dp.dataset.dplan);
@@ -635,6 +646,7 @@
     const tf = e.target.closest('[data-toolfound]'); if (tf){ tf.disabled = true; return act('ws_tool_found', { p_tool: tf.dataset.toolfound }, 'Marked as back'); }
     const em = e.target.closest('[data-editmat]'); if (em) return materialModal(em.dataset.editmat);
     const sb = e.target.closest('[data-std]'); if (sb) return stdModal(sb.dataset.std);
+    const os = e.target.closest('[data-osrc]'); if (os){ orderSrc = os.dataset.osrc; try { localStorage.setItem('kt-osrc', orderSrc); } catch (er) {} render(); return; }
     if (e.target.closest('#clearFilter')){ orderFilter = null; enter = true; render(); return; }
     if (e.target.closest('#sideSet') || e.target.closest('#mSet')) return settingsModal();
     const ew = e.target.closest('[data-editw]'); if (ew) return workerModal(ew.dataset.editw);
@@ -764,15 +776,19 @@
       : '<span class="ph-empty">No messages yet.</span>';
     g.scrollTop = g.scrollHeight;
   }
-  let qrLib = null;
-  function loadQR(){ return qrLib || (qrLib = new Promise((ok, no) => { if (window.qrcode) return ok(window.qrcode);
-    const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
-    sc.onload = () => ok(window.qrcode); sc.onerror = () => { qrLib = null; no(new Error('Could not load the QR maker. Check the internet.')); }; document.head.appendChild(sc); })); }
+  const loadQR = () => KQR.load();
+  async function sendPic(o, btn){
+    const was = btn ? btn.textContent : ''; if (btn){ btn.disabled = true; btn.textContent = 'Making picture…'; }
+    try { const r = await KQR.share({ ref: o.ref, item: `${o.qty} × ${o.item}`, customer: o.customer, notes: o.notes, link: roomLink(o) });
+      if (r === 'saved') toast('Picture saved to Downloads. Send it on WhatsApp or print it.'); else if (r === 'shared') toast('Picture sent ✓'); }
+    catch(e){ toast(errMsg(e)); }
+    if (btn){ btn.disabled = false; btn.textContent = was; }
+  }
   async function qrModal(o){
     const s = openModal(`<h2 style="text-align:center">${esc(o.ref)} · Order Room</h2><p class="sub" style="text-align:center">The customer scans this with their phone camera.</p>
       <div class="qr-box" id="qrBox"><span class="ph-empty">Making the code…</span></div>
       <p style="text-align:center;font-size:13px;color:var(--muted);word-break:break-all">${esc(roomLink(o))}</p>
-      <div class="actions"><button class="btn line" data-x>Close</button></div>`);
+      <div class="actions" style="flex-wrap:wrap"><button class="btn line" data-x>Close</button><a class="btn line" target="_blank" rel="noopener" href="${esc(waRoom(o))}" style="text-decoration:none;display:inline-flex;align-items:center">WhatsApp the link</a><button class="btn" data-rpic="${o.id}">📷 Send as picture</button></div>`);
     try { const q = (await loadQR())(0, 'M'); q.addData(roomLink(o)); q.make();
       s.querySelector('#qrBox').innerHTML = q.createSvgTag({ cellSize: 7, margin: 3, scalable: true }); }
     catch(e){ s.querySelector('#qrBox').innerHTML = `<span class="ph-empty">${esc(errMsg(e))}</span>`; }
@@ -783,7 +799,7 @@
     return new Date(iso + 'T12:00:00').toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short' }); };
   function deliveriesPanel(){
     const t = todayStr();
-    const list = S.orders.filter(o => !o.delivered && (o.delOn || orderProgress(o).finished))
+    const list = S.orders.filter(o => !o.delivered && (o.delOn || orderProgress(o).finished) && (tab !== 'orders' || orderSrc === 'all' || srcOf(o) === orderSrc))
       .sort((a, b) => (a.delOn || '9999') < (b.delOn || '9999') ? -1 : (a.delOn || '9999') > (b.delOn || '9999') ? 1 : a.deadline - b.deadline);
     if (!list.length) return '';
     const row = o => { const fin = orderProgress(o).finished, late = o.delOn && o.delOn < t;
@@ -1066,7 +1082,7 @@
       ${(() => { const use = orderUse(o); return use.length ? `<p class="section-title">Materials</p><div class="steps">${use.map(r => { const m = M(r.mat);
         return `<div class="step"><div style="flex:1"><b>${esc(m.name)}</b><div style="color:var(--muted);font-size:13px">Given ${n2(r.given)} ${esc(m.unit)}${r.normal != null ? ` · normal ${n2(r.normal)} ${esc(m.unit)}` : ''}</div></div>${r.over ? '<span class="pill p-attention">More than normal</span>' : r.normal != null ? '<span class="pill p-working">OK</span>' : ''}</div>`; }).join('')}</div>` : ''; })()}
       ${o.room && !o.delivered ? `<div class="room-box"><div class="ph-head"><b>💬 Customer's Order Room</b><small>Send this link to the customer. They add photos, write to you and approve the design.</small></div>
-        <div class="room-acts"><button class="btn sm" data-rcopy="${o.id}">Copy link</button><a class="btn sm line" target="_blank" rel="noopener" href="${esc(waRoom(o))}">WhatsApp</a><button class="btn sm line" data-rqr="${o.id}">Show QR</button><a class="btn sm line" target="_blank" rel="noopener" href="${esc(roomLink(o))}">Open</a></div>
+        <div class="room-acts"><button class="btn sm" data-rcopy="${o.id}">Copy link</button><a class="btn sm line" target="_blank" rel="noopener" href="${esc(waRoom(o))}">WhatsApp</a><button class="btn sm line" data-rqr="${o.id}">Show QR</button><button class="btn sm line" data-rpic="${o.id}">📷 Send as picture</button><a class="btn sm line" target="_blank" rel="noopener" href="${esc(roomLink(o))}">Open</a></div>
         <div class="room-ap ${o.approvedAt ? 'yes' : ''}">${o.approvedAt ? `✓ <b>Customer approved the design</b> · ${new Date(o.approvedAt).toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short' })} <button class="link-sm" data-runap="${o.id}">Undo</button>` : '⏳ Waiting for the customer to approve the design'}</div>
         <div class="room-msgs" id="roomMsgs"><span class="ph-empty">Loading messages…</span></div>
         <form class="room-reply" id="roomReply"><input id="roomIn" placeholder="Reply to the customer…" autocomplete="off"><button class="btn sm">Send</button></form></div>` : ''}

@@ -277,3 +277,18 @@ textarea.fm-in{resize:vertical;font-weight:600}
 .qr-how ol{margin:0 0 12px 20px;font-size:18px;line-height:1.7}
 .qr-link{font-size:13px;color:#6A6373;word-break:break-all;margin-top:8px}
 .sw-card .approved{margin:8px 0 2px;display:inline-block;background:#E4F0EC;color:#01332B;border-radius:12px;padding:8px 12px;font-size:15px}
+
+/* sending a client their Order Room */
+.qr-send{display:flex;gap:12px;flex-wrap:wrap;margin:0 0 18px}
+.qr-send .btn.big{flex:1;min-width:200px;height:60px;font-size:17px;border-radius:16px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;background:#fff}
+.cl-search{width:100%;margin:0 0 14px;font-size:17px}
+.cl-list{display:flex;flex-direction:column;gap:10px}
+.cl-row{display:flex;align-items:center;gap:16px;flex-wrap:wrap;background:#fff;border-radius:18px;padding:14px 16px}
+.cl-txt{flex:1;min-width:220px;display:flex;flex-direction:column;gap:2px}
+.cl-txt b{font-size:17px}
+.cl-txt span{color:var(--muted,#6A6373);font-size:14.5px}
+.cl-top{display:flex;align-items:center;gap:8px}
+.cl-txt .cl-ok{font-style:normal;display:inline-block;font-size:12.5px;font-weight:700;color:#0B4A3F;background:#E4F0EC;border-radius:999px;padding:2px 8px}
+.cl-acts{display:flex;gap:8px;flex-wrap:wrap}
+.cl-acts .btn{height:46px;padding:0 16px;border-radius:14px;display:inline-flex;align-items:center;text-decoration:none;font-weight:700;background:#fff}
+.fm-add small{font-weight:600;opacity:.7;font-size:13px}
