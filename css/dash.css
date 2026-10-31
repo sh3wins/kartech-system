@@ -478,3 +478,37 @@ body.dash .toast{border-radius:12px;background:var(--forest)}
 .ph-rm{position:absolute;top:4px;right:4px;border:0;border-radius:10px;background:rgba(0,0,0,.6);color:#fff;font-size:12px;padding:3px 7px;cursor:pointer}
 .ph-rm.sure{background:var(--red,#D64545)}
 .ph-empty{font-size:13px;color:var(--muted,#5E6B63)}
+
+/* pictures of what to make */
+.ph-box.ref{border-color:color-mix(in srgb,var(--deep,#185844) 35%,transparent);background:#FBF8F1}
+.ph-head{align-items:flex-start}
+.ph-head > b{white-space:nowrap}
+.ph-head small{flex:1;min-width:160px}
+.nf-pics{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:4px 0 6px}
+.nf-pics .ph-grid{margin:0}
+.nf-pics .ph img{width:72px;height:72px}
+.nf-pics .ph{width:72px}
+
+/* quote requests + manager orders */
+.reqbox{background:#F6F0E3}
+.p-mgr{background:#E3ECE6;color:#185844}
+.from-req{margin:-4px 0 10px;padding:10px 12px;border-radius:12px;background:#F6F0E3;font-size:13.5px}
+.req-contact{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.req-need{margin:12px 0 4px;padding:12px 14px;border-radius:12px;background:#fff;border:1px solid var(--line);white-space:pre-wrap;line-height:1.5}
+.ph .ph-x{text-decoration:none;font-weight:700;color:var(--deep)}
+
+/* the customer's Order Room, inside the order */
+.room-box{margin:14px 0 4px;padding:14px;border-radius:16px;background:#fff;border:1.5px solid color-mix(in srgb,var(--deep,#185844) 30%,transparent);display:flex;flex-direction:column;gap:10px}
+.room-acts{display:flex;gap:8px;flex-wrap:wrap}
+.room-acts a{text-decoration:none}
+.room-ap{font-size:14px;padding:9px 12px;border-radius:12px;background:#F6F0E3;color:#5A4A2A}
+.room-ap.yes{background:#E3ECE6;color:var(--deep,#185844)}
+.room-ap .link-sm{margin-left:6px;background:none;border:0;text-decoration:underline;color:inherit;cursor:pointer;font:inherit;font-size:13px}
+.room-msgs{display:flex;flex-direction:column;gap:6px;max-height:220px;overflow:auto;padding:2px}
+.rm{align-self:flex-start;max-width:85%;background:#F5EFE3;border-radius:14px 14px 14px 4px;padding:8px 11px;font-size:14px;line-height:1.4;white-space:pre-wrap}
+.rm.mine{align-self:flex-end;background:var(--deep,#185844);color:#fff;border-radius:14px 14px 4px 14px}
+.room-msgs .rm small{display:block;float:none;width:auto;white-space:normal;font-size:11px;opacity:.7;margin-top:3px;text-align:left}
+.room-reply{display:flex;gap:8px}
+.room-reply input{flex:1;min-width:0;border:1.5px solid var(--line);border-radius:12px;padding:10px 12px;font:inherit;background:#fff}
+.qr-box{display:flex;justify-content:center;margin:10px auto;width:min(300px,80vw)}
+.qr-box svg{width:100%;height:auto;background:#fff;border-radius:12px}

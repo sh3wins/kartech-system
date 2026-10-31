@@ -239,3 +239,41 @@ body.sw{background:var(--paper);color:var(--ink)}
 .fm-chip{font:inherit;font-weight:700;font-size:16px;padding:12px 18px;border-radius:16px;border:2px solid var(--line,#DCE3DC);background:#fff;cursor:pointer;transition:transform .25s cubic-bezier(.34,1.56,.64,1)}
 .fm-chip:active{transform:scale(.94)}
 .fm-chip.on{background:var(--deep,#01332B);border-color:var(--deep,#01332B);color:var(--lime,#8ABFB2)}
+
+/* pictures of what to make */
+.sw-card .pics{margin-top:14px}
+.sw-card .pics .k{margin-bottom:8px}
+.pics-row{display:flex;gap:10px;flex-wrap:wrap}
+.pic{padding:0;border:0;border-radius:14px;overflow:hidden;background:#EDEDF5;cursor:zoom-in;box-shadow:0 4px 14px rgba(1,51,43,.12)}
+.pic img{display:block;width:150px;height:150px;object-fit:cover}
+.pic-full{position:fixed;inset:0;z-index:95;background:rgba(1,20,17,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:20px}
+.pic-full img{max-width:100%;max-height:82vh;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.pic-full .btn{position:absolute;top:18px;right:18px}
+.pic-full p{color:#C4C4DB;font-size:15px}
+@media (max-width:860px){ .pic img{width:110px;height:110px} }
+
+/* manager: new order */
+.fm-adds{display:flex;gap:12px;flex-wrap:wrap;margin:0 0 18px}
+.fm-adds .fm-add{margin:0}
+.fm-add.sale{background:#01332B;color:#fff;border-style:solid;border-color:#01332B}
+.fm-add.sale small{font-weight:600;opacity:.75;font-size:13px}
+.no-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px 16px;margin-bottom:14px}
+.no-f{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+.no-f > span{font-size:12.5px;letter-spacing:.12em;text-transform:uppercase;color:#6A6373;font-weight:700}
+.no-f .fm-in{max-width:none;font-size:18px;padding:13px 15px}
+textarea.fm-in{resize:vertical;font-weight:600}
+.no-pics{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.no-pics .ph{position:relative}
+.no-pics img{width:110px;height:110px;object-fit:cover;border-radius:12px;display:block}
+.no-pics .ph-rm{position:absolute;top:4px;right:4px;border:0;border-radius:10px;background:rgba(0,0,0,.6);color:#fff;padding:3px 8px;cursor:pointer}
+.no-add{cursor:pointer;display:inline-flex;align-items:center}
+
+/* manager: the customer's QR code */
+.qr-wrap{display:flex;gap:32px;align-items:center;flex-wrap:wrap;background:#fff;border-radius:24px;padding:24px;margin:8px 0 18px}
+.qr-big{width:300px;max-width:100%;flex:none}
+.qr-big svg{width:100%;height:auto;display:block}
+.qr-how{flex:1;min-width:240px}
+.qr-how h3{font-size:22px;margin-bottom:10px}
+.qr-how ol{margin:0 0 12px 20px;font-size:18px;line-height:1.7}
+.qr-link{font-size:13px;color:#6A6373;word-break:break-all;margin-top:8px}
+.sw-card .approved{margin:8px 0 2px;display:inline-block;background:#E4F0EC;color:#01332B;border-radius:12px;padding:8px 12px;font-size:15px}

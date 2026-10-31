@@ -66,7 +66,7 @@
     if (busy) return; busy = true;
     try {
       const since = new Date(Date.now() - 30 * 864e5).toISOString();
-      const [w, o, l, wb, mt, mv, sd, tl, tc, tm, ln, hc] = await Promise.all([
+      const [w, o, l, wb, mt, mv, sd, tl, tc, tm, ln, hc, rq] = await Promise.all([
         db.from('ws_workers').select('id,name,stage,active,task_id,locked_until,created_at,away_on,covers,arrived_on,arrived_at').order('name'),
         db.from('ws_orders').select('*').or('delivered_at.is.null,delivered_at.gt.' + since).order('created_at', { ascending:false }).limit(400),
         db.from('ws_log').select('*').order('id', { ascending:false }).limit(60),
@@ -78,7 +78,8 @@
         db.from('ws_tool_checks').select('*').order('day', { ascending:false }).limit(40),
         db.from('ws_tool_missing').select('*').order('id', { ascending:false }).limit(300),
         db.from('ws_tool_loans').select('*').order('id', { ascending:false }).limit(300),
-        db.rpc('ws_has_foreman_pin')
+        db.rpc('ws_has_foreman_pin'),
+        db.from('custom_requests').select('*').in('status', ['new','contacted','quoted']).order('created_at', { ascending:false }).limit(100)
       ]);
       if (w.error || o.error || l.error) throw (w.error || o.error || l.error);
       const ids = o.data.map(x => x.id);
@@ -87,6 +88,7 @@
       const today = new Date().toLocaleDateString('en-CA', { timeZone:'Africa/Nairobi' });
       S.workers = w.data.map(x => ({ id:x.id, name:x.name, stage:x.stage, active:x.active, task:x.task_id, covers:x.covers || [], away: !!x.away_on && String(x.away_on).slice(0, 10) === today, arrived: !!x.arrived_on && String(x.arrived_on).slice(0, 10) === today, arrivedAt: x.arrived_at ? new Date(x.arrived_at).getTime() : null, locked: x.locked_until && new Date(x.locked_until) > new Date() })).map(w => Object.assign(w, { here: w.active && w.arrived && !w.away }));
       S.web = wb.error ? [] : wb.data;
+      S.reqs = rq && !rq.error ? rq.data : [];
       S.mats = mt.error ? [] : mt.data.map(x => ({ id:x.id, name:x.name, unit:x.unit, store:+x.in_store, low:+x.low_at, counted: x.counted !== false, active:x.active, stages:x.stages || [] }));
       S.moves = mv.error ? [] : mv.data.map(x => ({ id:x.id, at:new Date(x.at).getTime(), mat:x.material_id, kind:x.kind, qty:+x.qty, order:x.order_id, worker:x.worker_id, note:x.note }));
       S.tools = tl.error ? [] : tl.data.map(x => ({ id:x.id, name:x.name, worker:x.usual_worker, active:x.active, stages:x.stages || [] }));
@@ -95,7 +97,7 @@
       S.hasCode = hc.error ? null : !!hc.data;
       S.toolMissing = tm.error ? [] : tm.data.map(x => ({ tool:x.tool_id, worker:x.worker_id, since:String(x.since).slice(0, 10), found: !!x.found_at }));
       S.std = sd.error ? [] : sd.data.map(x => ({ product:x.product, mat:x.material_id, per:+x.per_piece }));
-      S.orders = o.data.map(x => ({ id:x.id, ref:x.ref, src:x.source_order_id || null, srcNo:x.source_no || null, customer:x.customer, item:x.item, qty:x.qty, deadline:new Date(x.deadline + 'T17:00'), dl:String(x.deadline).slice(0, 10), urgency:x.urgency, notes:x.notes, stages:x.stages, delivered: !!x.delivered_at, createdAt: new Date(x.created_at).getTime(), delOn: x.delivery_on ? String(x.delivery_on).slice(0, 10) : null, delPlace: x.delivery_place || '', delNote: x.delivery_note || '', deliveredAt: x.delivered_at ? new Date(x.delivered_at).getTime() : null }));
+      S.orders = o.data.map(x => ({ id:x.id, ref:x.ref, src:x.source_order_id || null, srcNo:x.source_no || null, customer:x.customer, item:x.item, qty:x.qty, deadline:new Date(x.deadline + 'T17:00'), dl:String(x.deadline).slice(0, 10), urgency:x.urgency, notes:x.notes, stages:x.stages, delivered: !!x.delivered_at, createdAt: new Date(x.created_at).getTime(), by: x.created_by || 'owner', reqId: x.request_id || null, room: x.room_code || null, approvedAt: x.approved_at ? new Date(x.approved_at).getTime() : null, delOn: x.delivery_on ? String(x.delivery_on).slice(0, 10) : null, delPlace: x.delivery_place || '', delNote: x.delivery_note || '', deliveredAt: x.delivered_at ? new Date(x.delivered_at).getTime() : null }));
       S.tasks = t.data.map(x => ({ id:x.id, order:x.order_id, step:x.step, stage:x.stage, status:x.status, worker:x.worker_id, rank:x.rank, withPrev: !!x.with_prev, doneAt: x.done_at ? new Date(x.done_at).getTime() : null, planned: Array.isArray(x.planned) ? x.planned : String(x.planned || '').replace(/[{}]/g, '').split(',').filter(Boolean),
         problem: x.problem_at ? { reason:x.problem_reason, at:new Date(x.problem_at).getTime(), stopped:!!x.problem_stopped, ack: !!x.problem_ack_at } : null }));
       S.log = l.data.map(x => ({ id:x.id, text:x.text, kind:x.kind, at:new Date(x.at).getTime(), order:x.order_id }));
@@ -131,6 +133,7 @@
       items.push({ lvl:'red', title:`${t.problem.stopped ? 'WORK STOPPED' : 'Problem'}: ${t.problem.reason}${t.problem.stopped && t.problem.ack ? " (you're on it)" : ''}`,
         sub:`${w ? w.name : 'Worker'} · ${o.ref} · ${stageName(t.stage)} · ${ago(t.problem.at)}`, act:`<button class="btn sm" data-solve="${t.id}">Mark solved</button>` }); });
     S.orders.filter(o => !o.delivered && !orderProgress(o).finished && isLate(o.deadline)).forEach(o => items.push({ lvl:'red', title:`${o.ref} is past its deadline`, sub:`${o.qty} × ${o.item} · ${o.customer}`, act:`<button class="btn sm line" data-open="${o.id}">Open</button>` }));
+    (S.reqs || []).filter(r => r.status === 'new').forEach(r => items.push({ lvl:'amber', title:`${r.space === 'Photo' ? 'New photo from' : 'New quote request from'} ${r.name}`, sub:`${(r.need || '').slice(0, 90)}${(r.files || []).length ? ` · 📎 ${r.files.length} photo${r.files.length > 1 ? 's' : ''}` : ''} · ${ago(new Date(r.created_at).getTime())}`, act:`<button class="btn sm" data-req="${r.id}">Open</button>` }));
     waitingWeb().forEach(w => items.push({ lvl:'amber', title:`New website order ${w.order_no}`, sub:`${w.customer_name} · ${(w.items || []).map(i => i.qty + ' × ' + i.name).join(', ')} · ${ago(new Date(w.created_at).getTime())}`, act:`<button class="btn sm" data-web="${w.id}">Send to workshop</button>` }));
     S.mats.filter(m => m.active && m.low > 0 && m.store <= m.low).forEach(m => items.push({ lvl:'amber', title:`Low stock: ${m.name}`, sub:`Only ${n2(m.store)} ${m.unit} left in the store`, act:`<button class="btn sm line" data-move="in" data-mat="${m.id}">Received</button>` }));
     watchList().slice(0, 3).forEach(a => items.push({ lvl:'red', title:a.title, sub:a.sub, act:`<button class="btn sm line" data-tabgo="stock">See stock</button>` }));
@@ -296,7 +299,7 @@
     const delivered = S.orders.filter(o => o.delivered);
     const row = o => { const p = orderProgress(o); const late = !p.finished && isLate(o.deadline);
       return `<button class="order" data-open="${o.id}">
-        <div><div class="ref">${o.ref} <span class="pill p-${o.urgency}">${URG_NAME[o.urgency]}</span>${o.srcNo ? ` <span class="pill p-web">🌐 ${esc(o.srcNo)}</span>` : ''}</div><div style="color:var(--muted);font-size:13px">${o.qty} × ${esc(o.item)} · ${esc(o.customer)}</div></div>
+        <div><div class="ref">${o.ref} <span class="pill p-${o.urgency}">${URG_NAME[o.urgency]}</span>${o.srcNo ? ` <span class="pill p-web">🌐 ${esc(o.srcNo)}</span>` : ''}${o.by === 'manager' ? ' <span class="pill p-mgr">👤 Manager</span>' : ''}${o.reqId ? ' <span class="pill p-web">📝 Quote</span>' : ''}${o.approvedAt ? ' <span class="pill p-done">✓ Approved</span>' : ''}</div><div style="color:var(--muted);font-size:13px">${o.qty} × ${esc(o.item)} · ${esc(o.customer)}</div></div>
         ${pipe(o)}
         <div class="due ${late && !o.delivered ? 'late' : ''}">${o.delivered ? 'Delivered' : p.finished ? '<span class="pill p-done">Ready</span>' : 'Due ' + fmtDay(o.deadline)}</div>
       </button>`; };
@@ -307,6 +310,7 @@
           <div><div class="ref">${esc(w.order_no)}</div><div style="color:var(--muted);font-size:13px">${esc(w.customer_name)} · ${ago(new Date(w.created_at).getTime())}</div></div>
           <div class="webitems">${(w.items || []).map(i => `${i.qty} × ${esc(i.name)}`).join('<br>')}</div>
           <span class="btn sm">Send to workshop</span></button>`).join('')}</div></div>` : ''}
+      ${orderFilter ? '' : requestsBox()}
       ${orderFilter ? '' : deliveriesPanel()}
       <h2>Orders</h2>
       <p class="sub">Most urgent first. Tap an order to see who's on it.</p>
@@ -619,6 +623,10 @@
     if (e.target.closest('[data-steps]')) return stepsModal();
     const gv = e.target.closest('[data-give]'); if (gv) return giveModal(gv.dataset.give);
     const pl = e.target.closest('[data-plan]'); if (pl) return planModal(pl.dataset.plan);
+    const rqb = e.target.closest('[data-req]'); if (rqb) return requestModal(rqb.dataset.req);
+    const rc = e.target.closest('[data-rcopy]'); if (rc){ const o = O(rc.dataset.rcopy); try { await navigator.clipboard.writeText(roomLink(o)); toast('Link copied. Paste it in WhatsApp or SMS.'); } catch(x){ prompt('Copy this link:', roomLink(o)); } return; }
+    const rqr = e.target.closest('[data-rqr]'); if (rqr) return qrModal(O(rqr.dataset.rqr));
+    const ru = e.target.closest('[data-runap]'); if (ru){ const { error } = await db.rpc('ws_room_unapprove', { p_order: ru.dataset.runap }); if (error) return toast(errMsg(error)); toast('Approval removed. Ask the customer to approve again.'); await load(); return orderModal(ru.dataset.runap); }
     const dp = e.target.closest('[data-dplan]'); if (dp) return deliveryModal(dp.dataset.dplan);
     const ww = e.target.closest('[data-wwork]'); if (ww && !ww.disabled) return workerWorkModal(ww.dataset.wwork);
     const aw = e.target.closest('[data-away]'); if (aw){ aw.disabled = true; const w = W(aw.dataset.away);
@@ -647,22 +655,26 @@
   /* ---------- photos of the work (private, owner only) ---------- */
   const PH_BUCKET = 'kartech-photos';
   async function loadPhotos(orderId){
-    const g = $('#phGrid'); if (!g) return;
-    const { data, error } = await db.from('ws_photos').select('*').in('order_id', [orderId]).order('id');
+    const gr = $('#phRef'); if (gr) loadPhotoGrid(orderId, gr, 'ref');
+    const g = $('#phGrid'); if (g) loadPhotoGrid(orderId, g, 'done');
+  }
+  async function loadPhotoGrid(orderId, g, kind){
+    const { data: all, error } = await db.from('ws_photos').select('*').in('order_id', [orderId]).order('id');
     if (!document.body.contains(g)) return;
     if (error){ g.innerHTML = `<span class="ph-empty">${/ws_photos/.test(errMsg(error)) ? 'Run update-12-all.sql in Supabase to turn on photos.' : esc(errMsg(error))}</span>`; return; }
-    if (!data.length){ g.innerHTML = '<span class="ph-empty">No photos yet.</span>'; return; }
-    let urls = [];
-    if (db.storage){ const r = await db.storage.from(PH_BUCKET).createSignedUrls(data.map(x => x.path), 3600); urls = r.data || []; }
+    const data = all.filter(x => (x.kind || 'done') === kind);
+    if (!data.length){ g.innerHTML = `<span class="ph-empty">${kind === 'ref' ? 'No pictures yet. Add one so nobody has to guess.' : 'No photos yet.'}</span>`; return; }
+    const urls = await signAll(data);
     if (!document.body.contains(g)) return;
-    g.innerHTML = data.map((x, i) => { const u = urls[i] && urls[i].signedUrl;
+    g.innerHTML = data.map((x, i) => { const u = urls[i];
       return `<div class="ph">${u ? `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" alt="Photo ${i + 1}" loading="lazy"></a>` : '<span class="ph-x">📷</span>'}
         <small>${new Date(x.at).toLocaleDateString('en-GB', { day:'numeric', month:'short' })}</small><button class="ph-rm" data-phrm="${x.id}" aria-label="Remove photo">✕</button></div>`; }).join('');
     g.onclick = async e => { const b = e.target.closest('[data-phrm]'); if (!b) return;
       if (!b.classList.contains('sure')){ b.classList.add('sure'); b.textContent = 'Remove?'; setTimeout(() => { if (document.body.contains(b)){ b.classList.remove('sure'); b.textContent = '✕'; } }, 4000); return; }
       b.disabled = true; const { data: path, error } = await db.rpc('ws_remove_photo', { p_id: +b.dataset.phrm });
       if (error) return toast(errMsg(error));
-      if (path && db.storage) await db.storage.from(PH_BUCKET).remove([path]);
+      const row = data.find(x => String(x.id) === b.dataset.phrm);
+      if (path && db.storage && (!row || (row.bucket || PH_BUCKET) === PH_BUCKET)) await db.storage.from(PH_BUCKET).remove([path]);
       toast('Photo removed'); loadPhotos(orderId); };
   }
   function shrink(file){
@@ -672,17 +684,98 @@
         URL.revokeObjectURL(url); c.toBlob(b => b ? ok(b) : no(new Error('Could not read the photo')), 'image/jpeg', .82); };
       img.onerror = () => { URL.revokeObjectURL(url); no(new Error('That file is not a photo')); }; img.src = url; });
   }
-  async function addPhoto(o, file){
-    const g = $('#phGrid'); if (g) g.insertAdjacentHTML('beforeend', '<span class="ph-empty" id="phUp">Uploading…</span>');
+  async function addPhoto(o, file, kind, quiet){
+    const g = $(kind === 'ref' ? '#phRef' : '#phGrid'); if (g) g.insertAdjacentHTML('beforeend', '<span class="ph-empty" id="phUp">Uploading…</span>');
     try {
       if (!db.storage) throw new Error('Photos need the real Supabase');
       const blob = await shrink(file), path = `${o.id}/${Date.now()}.jpg`;
       const up = await db.storage.from(PH_BUCKET).upload(path, blob, { contentType:'image/jpeg', upsert:false });
       if (up.error) throw up.error;
-      const { error } = await db.rpc('ws_add_photo', { p_order: o.id, p_path: path });
+      const { error } = await db.rpc('ws_add_photo', { p_order: o.id, p_path: path, p_kind: kind || 'done' });
       if (error){ await db.storage.from(PH_BUCKET).remove([path]); throw error; }
-      toast(`Photo added to ${o.ref}`); loadPhotos(o.id);
-    } catch(e){ $('#phUp')?.remove(); toast(/bucket|not found/i.test(errMsg(e)) ? 'Run update-12-all.sql in Supabase to turn on photos.' : errMsg(e)); }
+      if (!quiet){ toast(kind === 'ref' ? `Picture added to ${o.ref}. Workers will see it.` : `Photo added to ${o.ref}`); loadPhotos(o.id); }
+      return true;
+    } catch(e){ $('#phUp')?.remove(); toast(/bucket|not found/i.test(errMsg(e)) ? 'Run update-12-all.sql in Supabase to turn on photos.' : /ws_add_photo/.test(errMsg(e)) ? 'Run update-14-order-pictures.sql in Supabase first.' : errMsg(e)); return false; }
+  }
+
+  // signed links for photos that may sit in different stores (our photos, or the customer's from the website)
+  async function signAll(rows){
+    const out = rows.map(() => null); if (!db.storage) return out;
+    const by = {}; rows.forEach((x, i) => (by[x.bucket || PH_BUCKET] = by[x.bucket || PH_BUCKET] || []).push(i));
+    for (const [bk, idx] of Object.entries(by)){
+      const r = await db.storage.from(bk).createSignedUrls(idx.map(i => rows[i].path), 3600);
+      (r.data || []).forEach((u, k) => { out[idx[k]] = u && u.signedUrl; });
+    }
+    return out;
+  }
+
+  /* ---------- quote requests from the website ("Get a quote") ---------- */
+  const REQ_ST = { new:'New', contacted:'Contacted', quoted:'Quoted', in_progress:'Order made', closed:'Closed' };
+  function requestsBox(){
+    const rs = S.reqs || []; if (!rs.length) return '';
+    return `<div class="webbox reqbox"><p class="section-title" style="margin-top:0">📝 Quote requests · ${rs.length}</p>
+      <div class="list">${rs.map(r => `<button class="order webrow" data-req="${r.id}">
+        <div><div class="ref">${esc(r.name)} <span class="pill ${r.status === 'new' ? 'p-urgent' : 'p-normal'}">${REQ_ST[r.status] || r.status}</span>${r.space === 'Photo' ? ' <span class="pill p-web">📷 Photo</span>' : ''}</div>
+          <div style="color:var(--muted);font-size:13px">${esc(r.ref)} · ${ago(new Date(r.created_at).getTime())}${r.space ? ' · ' + esc(r.space) : ''}</div></div>
+        <div class="webitems">${esc((r.need || '').slice(0, 110))}${(r.need || '').length > 110 ? '…' : ''}${(r.files || []).length ? `<br><b>📎 ${r.files.length} photo${r.files.length > 1 ? 's' : ''}</b>` : ''}</div>
+        <span class="btn sm">Open</span></button>`).join('')}</div></div>`;
+  }
+  async function requestModal(id){
+    const r = (S.reqs || []).find(x => x.id === id); if (!r) return;
+    const digits = String(r.phone || '').replace(/\D/g, ''), wa = digits ? 'https://wa.me/' + (digits.startsWith('0') ? '254' + digits.slice(1) : digits) : '';
+    const s = openModal(`
+      <div style="display:flex;justify-content:space-between;align-items:start;gap:10px"><div><h2 style="margin:0">${esc(r.name)}</h2><p class="sub" style="margin:2px 0 0">${r.space === 'Photo' ? 'Sent a photo' : 'Quote request'} ${esc(r.ref)} · ${ago(new Date(r.created_at).getTime())}</p></div><span class="pill p-web">${r.space === 'Photo' ? '📷 Send-a-photo page' : '📝 Website'}</span></div>
+      <div class="req-contact">${r.phone ? `<a class="btn sm line" href="tel:${esc(r.phone)}">📞 ${esc(r.phone)}</a>` : ''}${wa ? `<a class="btn sm line" href="${esc(wa)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}${r.email ? `<a class="btn sm line" href="mailto:${esc(r.email)}">✉ ${esc(r.email)}</a>` : ''}</div>
+      ${r.space && r.space !== 'Photo' ? `<p style="margin:10px 0 0;font-size:13px;color:var(--muted)">For: <b>${esc(r.space)}</b></p>` : ''}
+      <p class="req-need">${esc(r.need || '')}</p>
+      <p class="section-title">📎 Photos from the customer</p>
+      <div class="ph-grid" id="rqPics">${(r.files || []).length ? '<span class="ph-empty">Loading…</span>' : '<span class="ph-empty">No photos sent.</span>'}</div>
+      <div class="field" style="margin-top:14px"><span>Where is this request?</span><div class="seg-pick" id="rqSt">${['new','contacted','quoted','closed'].map(k => `<button type="button" data-rs="${k}" class="${r.status === k ? 'on' : ''}">${REQ_ST[k]}</button>`).join('')}</div></div>
+      <p id="rqErr" class="ferr"></p>
+      <div class="actions"><button class="btn line" data-x>Close</button><button class="btn" id="rqOrder">Make it an order →</button></div>`);
+    if ((r.files || []).length && db.storage){
+      const res = await db.storage.from('request-files').createSignedUrls(r.files, 3600);
+      const g = s.querySelector('#rqPics'); if (!g) return;
+      g.innerHTML = r.files.map((f, i) => { const u = res.data && res.data[i] && res.data[i].signedUrl; const pdf = /\.pdf$/i.test(f);
+        return `<div class="ph">${u ? (pdf ? `<a class="ph-x" href="${esc(u)}" target="_blank" rel="noopener">📄 PDF</a>` : `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" alt="Photo ${i + 1}"></a>`) : '<span class="ph-x">📷</span>'}</div>`; }).join('');
+    }
+    s.querySelector('#rqSt').addEventListener('click', async e => { const b = e.target.closest('[data-rs]'); if (!b) return;
+      const { error } = await db.from('custom_requests').update({ status: b.dataset.rs }).eq('id', r.id);
+      if (error){ s.querySelector('#rqErr').textContent = errMsg(error); return; }
+      r.status = b.dataset.rs; s.querySelectorAll('#rqSt button').forEach(x => x.classList.toggle('on', x === b)); toast(`Marked ${REQ_ST[r.status].toLowerCase()}`); load(); });
+    s.querySelector('#rqOrder').onclick = () => newOrderModal({ customer: r.name + (r.phone ? ' (' + r.phone + ')' : ''), notes: (r.need || '').slice(0, 500), req: r });
+  }
+
+  /* ---------- the customer's Order Room (link, QR, messages) ---------- */
+  const roomLink = o => new URL('room.html?c=' + o.room, location.href).href;
+  function waRoom(o){
+    const first = String(o.customer || '').trim().split(/\s+/)[0];
+    const txt = `Hi ${first}, this is your Kartech order room for ${o.ref}: ${roomLink(o)}\nSend us photos, ask questions and approve your design there.`;
+    const d = (String(o.customer || '') + ' ' + String(o.notes || '')).match(/(?:\+?254|0)\s?7\d{2}\s?\d{3}\s?\d{3}|(?:\+?254|0)\s?1\d{2}\s?\d{3}\s?\d{3}/);
+    const num = d ? d[0].replace(/\D/g, '').replace(/^0/, '254') : '';
+    return 'https://wa.me/' + num + '?text=' + encodeURIComponent(txt);
+  }
+  async function loadRoomMsgs(orderId){
+    const g = $('#roomMsgs'); if (!g) return;
+    const { data, error } = await db.from('ws_room_msgs').select('*').in('order_id', [orderId]).order('id');
+    if (!document.body.contains(g)) return;
+    if (error){ g.innerHTML = `<span class="ph-empty">${/ws_room_msgs/.test(errMsg(error)) ? 'Run update-16-order-room.sql in Supabase to turn on the Order Room.' : esc(errMsg(error))}</span>`; return; }
+    g.innerHTML = data.length ? data.slice(-30).map(m => `<div class="rm ${m.who === 'kartech' ? 'mine' : ''}">${esc(m.text)}<small>${m.who === 'kartech' ? 'You' : 'Customer'} · ${ago(new Date(m.at).getTime())}</small></div>`).join('')
+      : '<span class="ph-empty">No messages yet.</span>';
+    g.scrollTop = g.scrollHeight;
+  }
+  let qrLib = null;
+  function loadQR(){ return qrLib || (qrLib = new Promise((ok, no) => { if (window.qrcode) return ok(window.qrcode);
+    const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
+    sc.onload = () => ok(window.qrcode); sc.onerror = () => { qrLib = null; no(new Error('Could not load the QR maker. Check the internet.')); }; document.head.appendChild(sc); })); }
+  async function qrModal(o){
+    const s = openModal(`<h2 style="text-align:center">${esc(o.ref)} · Order Room</h2><p class="sub" style="text-align:center">The customer scans this with their phone camera.</p>
+      <div class="qr-box" id="qrBox"><span class="ph-empty">Making the code…</span></div>
+      <p style="text-align:center;font-size:13px;color:var(--muted);word-break:break-all">${esc(roomLink(o))}</p>
+      <div class="actions"><button class="btn line" data-x>Close</button></div>`);
+    try { const q = (await loadQR())(0, 'M'); q.addData(roomLink(o)); q.make();
+      s.querySelector('#qrBox').innerHTML = q.createSvgTag({ cellSize: 7, margin: 3, scalable: true }); }
+    catch(e){ s.querySelector('#qrBox').innerHTML = `<span class="ph-empty">${esc(errMsg(e))}</span>`; }
   }
 
   /* ---------- deliveries ---------- */
@@ -827,24 +920,33 @@
     return { stages, people, together };
   }
 
-  function newOrderModal(){
+  function newOrderModal(pre){
+    pre = pre || {};
     const d = new Date(); d.setDate(d.getDate() + 7);
     const iso = d.toLocaleDateString('en-CA');
     const s = openModal(`
       <h2>New order</h2>
-      <label class="field"><span>Customer</span><input id="fCust" placeholder="e.g. Mama Oliech Restaurant" autocomplete="off"></label>
+      ${pre.req ? `<p class="from-req">📝 From quote request <b>${esc(pre.req.ref)}</b>${(pre.req.files || []).length ? ` · the customer's photos are added as "What to make" pictures` : ''}</p>` : ''}
+      <label class="field"><span>Customer</span><input id="fCust" placeholder="e.g. Mama Oliech Restaurant" autocomplete="off" value="${esc(pre.customer || '')}"></label>
       <div class="row2">
         <label class="field"><span>What</span><input id="fItem" placeholder="e.g. Bar stools" autocomplete="off"></label>
         <label class="field"><span>How many</span><input id="fQty" type="number" min="1" value="10"></label>
       </div>
       <label class="field"><span>Deadline</span><input id="fDate" type="date" value="${iso}"></label>
-      <label class="field"><span>Note for the workshop (optional)</span><textarea id="fNote" rows="2" placeholder="e.g. Black frames, red seats. Customer collects."></textarea></label>
+      <label class="field"><span>Note for the workshop (optional)</span><textarea id="fNote" rows="2" placeholder="e.g. Black frames, red seats. Customer collects.">${esc(pre.notes || '')}</textarea></label>
       <div class="field"><span>How urgent</span><div class="seg-pick" id="fUrg">
         <button type="button" data-u="normal" class="on">Normal</button><button type="button" data-u="high">High</button><button type="button" data-u="urgent">Urgent</button></div></div>
+      <div class="field"><span>📐 Pictures of what to make (optional)</span>
+        <div class="nf-pics"><label class="btn sm line">＋ Add pictures<input type="file" accept="image/*" multiple id="fPics" hidden></label><div class="ph-grid" id="fPicsGrid"></div></div>
+        <small style="color:var(--muted)">The customer's sample, a sketch, the colour. Workers see these on their job card.</small></div>
       <div class="field"><span>Steps and who does them</span>${stepPeople(true)}</div>
       <p id="fErr" style="color:var(--red);min-height:20px;font-size:13px"></p>
       <div class="actions"><button class="btn line" data-x>Cancel</button><button class="btn" id="fSave">Add to workshop</button></div>`);
     let urg = 'normal'; bindStepPeople(s);
+    const pics = []; const pg = s.querySelector('#fPicsGrid');
+    const drawPics = () => { pg.innerHTML = pics.map((f, i) => `<div class="ph"><img src="${URL.createObjectURL(f)}" alt=""><button type="button" class="ph-rm" data-fpx="${i}">✕</button></div>`).join(''); };
+    s.querySelector('#fPics').onchange = e => { pics.push(...[...e.target.files].filter(f => /^image\//.test(f.type))); e.target.value = ''; drawPics(); };
+    pg.addEventListener('click', e => { const b = e.target.closest('[data-fpx]'); if (!b) return; pics.splice(+b.dataset.fpx, 1); drawPics(); });
     s.querySelector('#fUrg').addEventListener('click', e => { const b = e.target.closest('[data-u]'); if (!b) return; urg = b.dataset.u; s.querySelectorAll('#fUrg button').forEach(x => x.classList.toggle('on', x === b)); });
     s.querySelector('#fSave').onclick = async () => {
       const customer = s.querySelector('#fCust').value.trim(), item = s.querySelector('#fItem').value.trim();
@@ -853,8 +955,9 @@
       if (!customer || !item || qty < 1) return s.querySelector('#fErr').textContent = 'Fill in the customer, what, and how many.';
       if (!stages.length) return s.querySelector('#fErr').textContent = 'Pick at least one step.';
       const btn = s.querySelector('#fSave'); btn.disabled = true; btn.textContent = 'Adding…';
-      const { data, error } = await db.rpc('ws_create_order', { p: { customer, item, qty, deadline: s.querySelector('#fDate').value || null, urgency: urg, stages, people, together, notes: s.querySelector('#fNote').value.trim() } });
+      const { data, error } = await db.rpc('ws_create_order', { p: { customer, item, qty, deadline: s.querySelector('#fDate').value || null, urgency: urg, stages, people, together, notes: s.querySelector('#fNote').value.trim(), request_id: pre.req ? pre.req.id : null } });
       if (error){ btn.disabled = false; btn.textContent = 'Add to workshop'; s.querySelector('#fErr').textContent = errMsg(error); return; }
+      if (pics.length){ btn.textContent = 'Adding pictures…'; await load(); const no = S.orders.find(x => x.ref === data); if (no) for (const f of pics) await addPhoto(no, f, 'ref', true); }
       closeModal(); tab = 'orders'; await load();
       const o = S.orders.find(x => x.ref === data); const t = o && S.tasks.find(x => x.order === o.id && x.worker);
       const first = o && S.tasks.filter(x => x.order === o.id).sort((a, b) => a.step - b.step)[0];
@@ -954,6 +1057,7 @@
     openModal(`
       <div style="display:flex;justify-content:space-between;align-items:start;gap:10px"><div><h2 style="margin:0">${o.ref}</h2><p class="sub" style="margin:2px 0 0">${esc(o.customer)}</p></div><span class="pill p-${o.urgency}">${URG_NAME[o.urgency]}</span></div>
       <p style="margin:14px 0 4px;font-size:17px"><b>${o.qty} × ${esc(o.item)}</b></p>
+      ${o.by === 'manager' ? `<p style="margin:4px 0;font-size:13px;color:var(--muted)">👤 Taken by the manager on the workshop screen</p>` : ''}
       ${o.srcNo ? `<p style="margin:4px 0;font-size:13px;color:var(--muted)">🌐 Website order ${esc(o.srcNo)} · the customer sees these steps live on their tracking page</p>` : ''}
       ${o.notes ? `<p style="margin:6px 0;padding:10px 12px;background:#fff;border:1px solid var(--line);border-radius:6px">📝 ${esc(o.notes)}</p>` : ''}
       <p class="${!p.finished && isLate(o.deadline) ? 'due late' : ''}" style="text-align:left">Deadline: ${fmtDay(o.deadline)}</p>
@@ -961,7 +1065,15 @@
       <div style="margin:14px 0">${pipe(o)}</div>
       ${(() => { const use = orderUse(o); return use.length ? `<p class="section-title">Materials</p><div class="steps">${use.map(r => { const m = M(r.mat);
         return `<div class="step"><div style="flex:1"><b>${esc(m.name)}</b><div style="color:var(--muted);font-size:13px">Given ${n2(r.given)} ${esc(m.unit)}${r.normal != null ? ` · normal ${n2(r.normal)} ${esc(m.unit)}` : ''}</div></div>${r.over ? '<span class="pill p-attention">More than normal</span>' : r.normal != null ? '<span class="pill p-working">OK</span>' : ''}</div>`; }).join('')}</div>` : ''; })()}
-      <div class="ph-box"><div class="ph-head"><b>📷 Photos</b>${p.finished && !o.delivered ? '<small>Take a photo of the finished work before it leaves</small>' : ''}
+      ${o.room && !o.delivered ? `<div class="room-box"><div class="ph-head"><b>💬 Customer's Order Room</b><small>Send this link to the customer. They add photos, write to you and approve the design.</small></div>
+        <div class="room-acts"><button class="btn sm" data-rcopy="${o.id}">Copy link</button><a class="btn sm line" target="_blank" rel="noopener" href="${esc(waRoom(o))}">WhatsApp</a><button class="btn sm line" data-rqr="${o.id}">Show QR</button><a class="btn sm line" target="_blank" rel="noopener" href="${esc(roomLink(o))}">Open</a></div>
+        <div class="room-ap ${o.approvedAt ? 'yes' : ''}">${o.approvedAt ? `✓ <b>Customer approved the design</b> · ${new Date(o.approvedAt).toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short' })} <button class="link-sm" data-runap="${o.id}">Undo</button>` : '⏳ Waiting for the customer to approve the design'}</div>
+        <div class="room-msgs" id="roomMsgs"><span class="ph-empty">Loading messages…</span></div>
+        <form class="room-reply" id="roomReply"><input id="roomIn" placeholder="Reply to the customer…" autocomplete="off"><button class="btn sm">Send</button></form></div>` : ''}
+      <div class="ph-box ref"><div class="ph-head"><b>📐 What to make</b><small>Customer's sample, a sketch, the colour. Workers see these on their job.</small>
+        ${o.delivered ? '' : '<label class="btn sm ph-add">＋ Add picture<input type="file" accept="image/*" multiple id="phInRef" hidden></label>'}</div>
+        <div class="ph-grid" id="phRef"><span class="ph-empty">Loading…</span></div></div>
+      <div class="ph-box"><div class="ph-head"><b>📷 Finished work</b><small>${p.finished && !o.delivered ? 'Take a photo before it leaves. ' : ''}Only you see these.</small>
         <label class="btn sm line ph-add">＋ Add photo<input type="file" accept="image/*" capture="environment" id="phIn" hidden></label></div>
         <div class="ph-grid" id="phGrid"><span class="ph-empty">Loading…</span></div></div>
       <p class="section-title">Steps</p>
@@ -975,7 +1087,12 @@
       </div>`);
     const eb = $('#edOrder'); if (eb) eb.onclick = () => editOrderModal(o.id);
     loadPhotos(o.id);
-    const phIn = $('#phIn'); if (phIn) phIn.onchange = () => { const f = phIn.files && phIn.files[0]; if (f) addPhoto(o, f); phIn.value = ''; };
+    if (o.room && !o.delivered){ loadRoomMsgs(o.id);
+      $('#roomReply').onsubmit = async e => { e.preventDefault(); const t = $('#roomIn').value.trim(); if (!t) return;
+        const { error } = await db.rpc('ws_room_reply', { p_order: o.id, p_text: t }); if (error) return toast(/ws_room_reply/.test(errMsg(error)) ? 'Run update-16-order-room.sql in Supabase first.' : errMsg(error));
+        $('#roomIn').value = ''; toast('Sent. The customer sees it in their Order Room.'); loadRoomMsgs(o.id); }; }
+    const phIn = $('#phIn'); if (phIn) phIn.onchange = () => { const f = phIn.files && phIn.files[0]; if (f) addPhoto(o, f, 'done'); phIn.value = ''; };
+    const phR = $('#phInRef'); if (phR) phR.onchange = async () => { const fs = [...(phR.files || [])]; phR.value = ''; for (const f of fs) await addPhoto(o, f, 'ref'); };
     const u = $('#mkUrgent');
     if (u) u.onclick = async () => { u.disabled = true; closeModal(); await act('ws_make_urgent', { p_order: o.id }, `${o.ref} is now urgent`); };
   }
@@ -1300,6 +1417,7 @@
     problem: (w, t) => sw() ? `${w} ana shida. ${SW_REASON[t.problem.reason] || t.problem.reason}. Bado anaendelea na kazi.` : `${w} reported a problem. ${t.problem.reason}. They are still working.`,
     finished: (w, o, next) => sw() ? `${w} amemaliza ${o.item}. ${next ? 'Imeenda ' + (SW_STAGE[next] || stageName(next)) + '.' : 'Iko tayari kupelekwa.'}`
                                    : `${w} finished the ${o.item.toLowerCase()}. ${next ? 'It has gone to ' + stageName(next) + '.' : 'It is ready for delivery.'}`,
+    req: (r) => sw() ? `Ombi jipya la bei. ${r.name}.` : `New quote request from the website. ${r.name}.`,
     web: (w) => sw() ? `Oda mpya kutoka kwa website. ${w.customer_name}.` : `New order from the website. ${w.customer_name}.`,
     waiting: w => sw() ? `${w} anasubiri kazi.` : `${w} is waiting for work.`,
     test: () => sw() ? 'Habari. Hii ni sauti ya Kartech.' : 'Hello. This is the Kartech voice.'
@@ -1307,11 +1425,12 @@
   if (window.speechSynthesis) speechSynthesis.onvoiceschanged = () => { if (tab === 'today' && !document.querySelector('.scrim') && loaded) render(); };
 
   /* Small updates: compare what changed since the last refresh and read it out once */
-  let prevTasks = null, prevWorkers = null, prevWeb = null, prevLogId = Infinity;
+  let prevTasks = null, prevWorkers = null, prevWeb = null, prevLogId = Infinity, prevReq = null;
   function announceChanges(){
-    if (!prevTasks){ prevTasks = new Map(S.tasks.map(t => [t.id, t])); prevWorkers = new Map(S.workers.map(w => [w.id, w])); prevWeb = new Set((S.web || []).map(w => w.id)); prevLogId = S.log.length ? S.log[0].id : 0; return; }
+    if (!prevTasks){ prevTasks = new Map(S.tasks.map(t => [t.id, t])); prevWorkers = new Map(S.workers.map(w => [w.id, w])); prevWeb = new Set((S.web || []).map(w => w.id)); prevReq = new Set((S.reqs || []).map(r => r.id)); prevLogId = S.log.length ? S.log[0].id : 0; return; }
     const lines = [];
     (S.web || []).forEach(w => { if (!prevWeb.has(w.id)) lines.push(MSG.web(w)); });
+    (S.reqs || []).forEach(r => { if (prevReq && !prevReq.has(r.id) && r.status === 'new') lines.push(MSG.req(r)); }); prevReq = new Set((S.reqs || []).map(r => r.id));
     prevWeb = new Set((S.web || []).map(w => w.id));
     S.log.filter(l => l.id > prevLogId && l.kind === 'alert' && /^Low stock|MISSING|has been given|^Tool check: \d/.test(l.text)).slice(0, 2)
       .forEach(l => lines.push(sw() ? (/^Low stock/.test(l.text) ? 'Tahadhari ya stoo. ' : 'Tahadhari ya vifaa. ') + l.text : l.text.replace(/KT-(\d+)/g, (m, d) => sayRef('KT-' + d)).replace(/ × /g, ' ')));

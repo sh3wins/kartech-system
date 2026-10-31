@@ -131,7 +131,7 @@
           : w.away ? 'Away today' : esc(stageName(w.stage)) + ' · tap when they arrive'}</small></span></button>`; };
       v.innerHTML = head('Manager', 'When a worker walks in, tap their name. Their tools pop up. Tick what they take.') + `
         <button class="tc-banner anim ${checkNeeded() ? 'due' : ''}" id="fmCheck" style="--i:1"><span>🔧</span><span><b>${d.done_today ? 'Tool check done for today ✓' : 'Evening tool check'}</b><small>${out.length ? out.length + ' tool' + (out.length > 1 ? 's' : '') + ' out right now' : 'All tools are in'}</small></span></button>
-        <button class="fm-add anim" id="fmAddW" style="--i:1">＋ Add a new worker</button>
+        <div class="fm-adds anim" style="--i:1"><button class="fm-add sale" id="fmNewOrder">＋ New order <small>(customer in the shop)</small></button><button class="fm-add" id="fmAddW">＋ Add a new worker</button></div>
         ${notIn.length ? `<div class="st-group anim" style="--i:2"><h4>Not in yet · ${notIn.length}</h4><div class="names">${notIn.map(card).join('')}</div></div>` : ''}
         ${inn.length ? `<div class="st-group anim" style="--i:3"><h4>In today · ${inn.length}</h4><div class="names">${inn.map(card).join('')}</div></div>` : ''}`;
       return;
@@ -153,6 +153,42 @@
             ${td && td.last ? `<button class="again" data-again="${m.id}" data-q="${nf(td.last)}">+ ${nf(td.last)} again</button>` : ''}</div>`; }).join('') || '<p class="muted">No materials for this step yet.</p>'}</div></div>
         <button class="giant go anim" id="fmDone" style="--i:3">✓ Done</button>
         ${fm.pick ? qtyPanel(w) : ''}`;
+      return;
+    }
+    if (fm.view === 'qr' && fm.qr){
+      v.innerHTML = head('Give this to the customer', `Order ${esc(fm.qr.ref)} is saved. This is the customer's own Order Room.`, false) + `
+        <div class="qr-wrap anim" style="--i:1">
+          <div class="qr-big">${fm.qr.svg || '<p class="muted">Making the code…</p>'}</div>
+          <div class="qr-how">
+            <h3>Customer: scan this with your phone camera</h3>
+            <ol><li>Open your phone camera</li><li>Point it at the code</li><li>Tap the link that appears</li></ol>
+            <p class="muted">In their Order Room they can send photos, write to Kartech and approve the design. Keep the page: the link works any time.</p>
+            <p class="qr-link">${esc(fm.qr.link)}</p>
+          </div>
+        </div>
+        <button class="giant go anim" id="qrDone" style="--i:2">✓ Done</button>`;
+      return;
+    }
+    if (fm.view === 'neworder'){
+      const n = fm.no, chip = st => `<button class="fm-chip ${n.stages.includes(st.id) ? 'on' : ''}" data-nst="${st.id}">${n.stages.includes(st.id) ? '✓ ' : ''}${esc(st.name)}</button>`;
+      v.innerHTML = head('New order', 'A customer is here and the owner is away. Write it down here, the owner is told straight away.', true) + `
+        <div class="no-grid anim" style="--i:1">
+          <label class="no-f"><span>Customer name</span><input class="fm-in" data-nf="customer" value="${esc(n.customer)}" placeholder="e.g. Mary Wanjiku" autocomplete="off"></label>
+          <label class="no-f"><span>Phone</span><input class="fm-in" data-nf="phone" value="${esc(n.phone)}" placeholder="07…" inputmode="tel" autocomplete="off"></label>
+          <label class="no-f"><span>What</span><input class="fm-in" data-nf="item" value="${esc(n.item)}" placeholder="e.g. Bar stools" autocomplete="off"></label>
+          <label class="no-f"><span>How many</span><input class="fm-in" data-nf="qty" value="${esc(n.qty)}" inputmode="numeric" placeholder="1"></label>
+          <label class="no-f"><span>Ready by</span><input class="fm-in" type="date" data-nf="deadline" value="${esc(n.deadline)}"></label>
+          <div class="no-f"><span>How urgent</span><div class="fm-chips">${['normal','urgent'].map(u => `<button class="fm-chip ${n.urgency === u ? 'on' : ''}" data-nurg="${u}">${u === 'normal' ? 'Normal' : '⚡ Urgent'}</button>`).join('')}</div></div>
+        </div>
+        <label class="no-f anim" style="--i:2"><span>Exact details: size, colour, material</span><textarea class="fm-in" data-nf="notes" rows="3" placeholder="e.g. 75 cm high, black frame, red seat">${esc(n.notes)}</textarea></label>
+        <div class="st-group anim" style="--i:3"><h4>📐 Pictures of what to make</h4>
+          <div class="no-pics">${n.files.map((f, i) => `<div class="ph"><img src="${f._u}" alt=""><button class="ph-rm" data-npx="${i}">✕</button></div>`).join('')}
+            <label class="fm-chip no-add">📷 Add picture<input type="file" accept="image/*" capture="environment" multiple id="noPics" hidden></label></div></div>
+        <div class="st-group anim" style="--i:4"><h4>Steps it needs · tap to remove</h4><div class="fm-chips">${STAGES.map(chip).join('')}</div></div>
+        <p class="err" id="noErr">${esc(n.err || '')}</p>
+        <button class="giant go anim" id="noSave" style="--i:5">✓ Add order</button>`;
+      v.querySelectorAll('[data-nf]').forEach(el => el.addEventListener('input', () => { fm.no[el.dataset.nf] = el.value; fmIdle(); }));
+      const pi = $('#noPics'); if (pi) pi.onchange = () => { [...pi.files].filter(f => /^image\//.test(f.type)).forEach(f => { f._u = URL.createObjectURL(f); fm.no.files.push(f); }); renderForeman(); };
       return;
     }
     if (fm.view === 'wedit'){
@@ -191,8 +227,35 @@
   async function fmClick(b){
     fmIdle();
     if (b.id === 'fmExit') return fmClose();
+    if (b.id === 'fmBack' && fm.view === 'neworder'){ fm.no = null; fm.view = 'home'; return renderForeman(); }
     if (b.id === 'fmBack' && fm.view === 'wedit' && fm.ed && fm.ed.id){ fm.view = 'worker'; return renderForeman(); }
     if (b.id === 'fmBack'){ fm.view = 'home'; fm.pick = null; await fmLoad(); return renderForeman(); }
+    if (b.id === 'fmNewOrder'){ const d = new Date(); d.setDate(d.getDate() + 7);
+      fm.no = { customer:'', phone:'', item:'', qty:'1', deadline: d.toLocaleDateString('en-CA'), urgency:'normal', notes:'', files:[], stages: STAGES.map(x => x.id), err:'' }; fm.view = 'neworder'; return renderForeman(); }
+    if (b.dataset.nst){ const x = b.dataset.nst, st = fm.no.stages; fm.no.stages = st.includes(x) ? st.filter(y => y !== x) : STAGES.map(z => z.id).filter(z => st.includes(z) || z === x); return renderForeman(); }
+    if (b.dataset.nurg){ fm.no.urgency = b.dataset.nurg; return renderForeman(); }
+    if (b.dataset.npx){ fm.no.files.splice(+b.dataset.npx, 1); return renderForeman(); }
+    if (b.id === 'noSave'){ const n = fm.no;
+      if (!n.customer.trim() || !n.item.trim()){ n.err = 'Write the customer and what they want.'; return renderForeman(); }
+      if (!n.stages.length){ n.err = 'Keep at least one step.'; return renderForeman(); }
+      b.disabled = true; b.textContent = 'Adding…';
+      const notes = [n.notes.trim(), n.phone.trim() ? 'Phone: ' + n.phone.trim() : ''].filter(Boolean).join(' · ');
+      const { data, error } = await db.rpc('ws_foreman_create_order', { p_pin: fm.pin, p: { customer: n.customer.trim(), item: n.item.trim(), qty: Math.max(1, parseInt(n.qty, 10) || 1), deadline: n.deadline || null, urgency: n.urgency, notes, stages: n.stages } });
+      if (error){ n.err = /ws_foreman_create_order/.test(errMsg(error)) ? 'The owner needs to run update-15-sales.sql in Supabase first.' : errMsg(error); return renderForeman(); }
+      let bad = 0;
+      for (const f of n.files){ b.textContent = 'Adding pictures…';
+        try { if (!db.storage) throw 0; const blob = await shrinkPic(f), path = `${data.id}/${Date.now()}.jpg`;
+          const up = await db.storage.from('kartech-photos').upload(path, blob, { contentType:'image/jpeg', upsert:false }); if (up.error) throw up.error;
+          const r = await db.rpc('ws_foreman_add_photo', { p_pin: fm.pin, p_order: data.id, p_path: path }); if (r.error) throw r.error;
+        } catch(e){ bad++; } }
+      toast(`${data.ref} added ✓ The owner has been told.${bad ? ` ${bad} picture${bad > 1 ? 's' : ''} did not upload.` : ''}`);
+      const rc = await db.rpc('ws_foreman_room_code', { p_pin: fm.pin, p_order: data.id });
+      fm.no = null; await fmLoad();
+      if (!rc.error && rc.data){ fm.qr = { ref: data.ref, link: new URL('room.html?c=' + rc.data, location.href).href, svg: '' }; fm.view = 'qr'; renderForeman();
+        try { const q = (await loadQR())(0, 'M'); q.addData(fm.qr.link); q.make(); fm.qr.svg = q.createSvgTag({ cellSize: 8, margin: 3, scalable: true }); } catch(e){ fm.qr.svg = '<p class="muted">Could not make the code. Give the customer the link below.</p>'; }
+        return renderForeman(); }
+      fm.view = 'home'; return renderForeman(); }
+    if (b.id === 'qrDone'){ fm.qr = null; fm.view = 'home'; return renderForeman(); }
     if (b.id === 'fmAddW'){ fm.ed = { id:null, name:'', stage:null, covers:[] }; fm.view = 'wedit'; return renderForeman(); }
     if (b.id === 'fmEditW'){ const w = fmW(fm.wid); if (!w) return; fm.ed = { id:w.id, orig:w.name, name:w.name, stage:w.stage, covers:(w.covers || []).slice(), busy: !!w.job }; fm.view = 'wedit'; return renderForeman(); }
     if (b.dataset.fmain){ fm.ed.stage = b.dataset.fmain; fm.ed.covers = fm.ed.covers.filter(x => x !== b.dataset.fmain); return renderForeman(); }
@@ -311,8 +374,10 @@
         <p class="big">${o.qty} × ${esc(o.item)}</p>
         <p class="step">${stageName(t.stage)}${working ? ' · <span class="on">in progress</span>' : ''}</p>
         ${t.with ? `<p class="with">👥 Together with <b>${esc(t.with)}</b></p>` : ''}
+        ${t.approved ? `<p class="approved">✓ <b>Customer approved this design</b> · ${new Date(t.approved).toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short' })}</p>` : ''}
         <div class="tags"><span class="tag u-${o.urgency}">${o.urgency === 'normal' ? 'Normal' : '● ' + URG_NAME[o.urgency] + ' priority'}</span><span class="tag due">◷ Due ${fmtDay(new Date(o.deadline + 'T17:00'))}</span><span class="tag">Then: ${job.after ? stageName(job.after) : 'Delivery'}</span></div>
         ${o.notes ? `<div class="note">📝 ${esc(o.notes)}</div>` : ''}
+        ${pics.length ? `<div class="pics"><p class="k">📐 What to make · tap to see big</p><div class="pics-row">${pics.map((u, i) => `<button class="pic" data-pic="${i}"><img src="${esc(u)}" alt="Picture ${i + 1}"></button>`).join('')}</div></div>` : ''}
         ${mats.length ? `<div class="note mats-given"><b>📦 Materials given to you for this job</b><br>${mats.map(m => `${+(+m.qty).toFixed(2)} ${esc(m.unit)} ${esc(m.name)}`).join(' · ')}<br><small>Bring anything left over back to the store.</small></div>` : ''}
         ${t.problem_reason ? `<div class="note warn">⚠ You reported: <b>${esc(t.problem_reason)}</b>${t.problem_stopped ? ' · work stopped' : ''}.<br>${t.problem_ack ? '<b class="okay">✓ The owner has seen this and is on it.</b>' : t.problem_stopped ? "The owner's alarm is ringing. Please wait here." : 'The owner has been told.'}</div>` : ''}
         ${working ? `<button class="giant done" id="stDone">✓ I've finished</button>` : `<button class="giant go" id="stStart">▶ Start work</button>`}
@@ -341,9 +406,44 @@
     if (error){ if (/Signed out/i.test(error.message)) return signOut(); $('#live').classList.add('off'); return; }
     $('#live').classList.remove('off');
     const mr = data && data.task ? await db.rpc('ws_my_materials', { p_token: token }) : { data: [] };
-    const before = JSON.stringify([job, mats]); job = data; mats = mr.error ? [] : (mr.data || []);
-    if (JSON.stringify([job, mats]) !== before && !probOpen && !probReason) render();
+    const before = JSON.stringify([job, mats, pics]); job = data; mats = mr.error ? [] : (mr.data || []);
+    await loadPics();
+    if (JSON.stringify([job, mats, pics]) !== before && !probOpen && !probReason) render();
   }
+
+  /* ---------- pictures of what to make (from the owner) ---------- */
+  let pics = [], picsFor = null, picsAt = 0;
+  async function loadPics(){
+    const key = job && job.order ? job.order.ref : null;
+    if (!key){ pics = []; picsFor = null; return; }
+    if (key === picsFor && Date.now() - picsAt < 50 * 60000) return;   // signed links last an hour
+    let { data, error } = await db.rpc('ws_job_pics', { p_token: token });
+    if (error && /ws_job_pics/.test(errMsg(error))){ const old = await db.rpc('ws_job_pictures', { p_token: token }); error = old.error; data = (old.data || []).map(p => ({ b:'kartech-photos', p })); }
+    if (error || !data || !data.length || !db.storage){ pics = []; picsFor = key; picsAt = Date.now(); return; }
+    const out = [];
+    for (const bk of [...new Set(data.map(x => x.b))]){ const list = data.filter(x => x.b === bk);
+      const r = await db.storage.from(bk).createSignedUrls(list.map(x => x.p), 3600); (r.data || []).forEach(u => u && u.signedUrl && out.push(u.signedUrl)); }
+    pics = out; picsFor = key; picsAt = Date.now();
+  }
+  function picView(i){
+    const o = document.createElement('div'); o.className = 'pic-full';
+    o.innerHTML = `<img src="${esc(pics[i])}" alt="Picture ${i + 1}"><button class="btn" aria-label="Close">✕ Close</button>${pics.length > 1 ? `<p>${i + 1} of ${pics.length} · tap the picture for the next one</p>` : ''}`;
+    o.addEventListener('click', e => { resetIdle(); if (e.target.closest('button')) return o.remove(); if (pics.length > 1){ o.remove(); picView((i + 1) % pics.length); } });
+    document.body.appendChild(o);
+  }
+
+  function shrinkPic(file){
+    return new Promise((ok, no) => { const img = new Image(), url = URL.createObjectURL(file);
+      img.onload = () => { const k = Math.min(1, 1600 / Math.max(img.width, img.height)); const c = document.createElement('canvas');
+        c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url); c.toBlob(b => b ? ok(b) : no(new Error('Could not read the picture')), 'image/jpeg', .82); };
+      img.onerror = () => { URL.revokeObjectURL(url); no(new Error('That file is not a picture')); }; img.src = url; });
+  }
+
+  let qrLib = null;
+  function loadQR(){ return qrLib || (qrLib = new Promise((ok, no) => { if (window.qrcode) return ok(window.qrcode);
+    const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
+    sc.onload = () => ok(window.qrcode); sc.onerror = () => { qrLib = null; no(new Error('qr')); }; document.head.appendChild(sc); })); }
 
   /* ---------- idle sign-out ---------- */
   function resetIdle(){
@@ -375,6 +475,7 @@
     const b = e.target.closest('button'); if (!b) return;
     if (b.id === 'retry') return loadNames();
     if (fm) return fmClick(b);
+    if (b.dataset.pic) return picView(+b.dataset.pic);
     if (b.id === 'fmOpen' || b.id === 'tcOpen'){ fm = { view:'pin', entry:'', then: b.id === 'tcOpen' ? 'check' : 'home' }; fmIdle(); return render(); }
     if (b.dataset.who){
       b.disabled = true;
