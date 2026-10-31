@@ -524,3 +524,35 @@ body.dash .toast{border-radius:12px;background:var(--forest)}
 .src-tab.on span{background:var(--lime,#B08A4F);color:var(--deep,#185844)}
 .src-tab:last-child{min-width:90px}
 @media (max-width:620px){.src-tabs{grid-template-columns:1fr 1fr auto;gap:6px}.src-tab{padding:10px 10px 10px 12px}.src-tab b{font-size:14px;padding-right:26px}.src-tab small{display:none}.src-tab span{top:8px;right:8px}.src-tab:last-child{min-width:0}}
+
+/* payments (steps only, never amounts) */
+.pill.p-hold{background:#F6EEDC;color:#7A5A26}
+.pill.p-paycheck{background:#FDE7D6;color:#9A4A12}
+.mcode{font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:.06em}
+.paycheck{background:#FFF6EC}
+.pay-box{margin:12px 0 4px;padding:14px;border-radius:16px;background:#fff;border:1.5px solid color-mix(in srgb,var(--lime,#B08A4F) 45%,transparent);display:flex;flex-direction:column;gap:10px}
+.pay-box.off{flex-direction:column;gap:4px;border-style:dashed}
+.pay-box.off small{color:var(--muted);font-size:13px}
+.pay-warn{margin:0;font-size:13.5px;background:#FFF6EC;border-radius:10px;padding:8px 10px;color:#7A4A12}
+.pay-hold{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13.5px;background:#F6EEDC;color:#5A4520;border-radius:12px;padding:9px 12px}
+.pay-hold span{flex:1;min-width:200px}
+.pay-hold.soft{background:#F4F1EA;color:var(--muted)}
+.pay-steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.pay-steps li{display:flex;gap:12px;position:relative;padding:0 0 14px}
+.pay-steps li:last-child{padding-bottom:0}
+.pay-steps li:not(:last-child)::before{content:"";position:absolute;left:11px;top:26px;bottom:2px;width:2px;background:#E8E1D2}
+.pdot{flex:none;width:24px;height:24px;border-radius:50%;border:2px solid #E3D9C6;background:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#fff}
+.pay-steps li.now .pdot{border:2.5px solid var(--lime,#B08A4F)}
+.pay-steps li.check .pdot{border-color:#D9822B;background:#FDE7D6}
+.pay-steps li.done .pdot{background:var(--deep,#185844);border-color:var(--deep,#185844)}
+.pbody{flex:1;display:flex;flex-direction:column;gap:3px;min-width:0}
+.pbody b{font-size:14.5px}
+.pay-steps li:not(.now):not(.done) .pbody b{color:var(--muted)}
+.pbody small{font-size:13px;color:var(--muted);line-height:1.45}
+.pacts{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px}
+.pacts a.btn{text-decoration:none;display:inline-flex;align-items:center}
+.pbody .link-sm,.pay-hold .link-sm,.pay-warn .link-sm,.pacts .link-sm{background:none;border:0;padding:0;text-decoration:underline;color:inherit;cursor:pointer;font:inherit;font-size:13px}
+.hold-pick{display:flex;gap:10px;align-items:flex-start;background:#F6EEDC;border-radius:12px;padding:10px 12px;margin:4px 0 6px;cursor:pointer}
+.hold-pick input{width:18px;height:18px;margin-top:2px;accent-color:var(--deep,#185844)}
+.hold-pick span{display:flex;flex-direction:column;gap:2px}
+.hold-pick small{font-size:12.5px;color:var(--muted)}

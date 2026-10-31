@@ -163,6 +163,7 @@
           <div class="qr-how">
             <h3>Customer here? Scan this with your phone camera</h3>
             <ol><li>Open your phone camera</li><li>Point it at the code</li><li>Tap the link that appears</li></ol>
+            ${q.isNew ? '<p class="qr-wait">⏳ The workshop starts this order after the owner confirms the deposit.</p>' : ''}
             <p class="muted">Customer not here? Send it to them with a button below. In their Order Room they can send photos, write to Kartech and approve the design.</p>
             <p class="qr-link">${esc(q.link)}</p>
           </div>
@@ -181,7 +182,7 @@
       v.innerHTML = head('Client links', 'Each client has their own private order page. Send it on WhatsApp, as a picture, or let them scan the code.', true) + `
         <input class="fm-in cl-search anim" id="clFind" value="${esc(fm.lq || '')}" placeholder="🔍 Find a client, order number or item" autocomplete="off" style="--i:1">
         <div class="cl-list anim" style="--i:2">${list.map(o => `<div class="cl-row">
-            <div class="cl-txt"><div class="cl-top"><b>${esc(o.ref)}</b>${o.approved ? '<em class="cl-ok">✓ Approved</em>' : ''}</div><span>${esc(o.qty + ' × ' + o.item)} · ${esc(o.customer)}</span></div>
+            <div class="cl-txt"><div class="cl-top"><b>${esc(o.ref)}</b>${o.approved ? '<em class="cl-ok">✓ Approved</em>' : ''}${o.hold ? '<em class="cl-ok wait">⏳ Waiting for deposit</em>' : ''}</div><span>${esc(o.qty + ' × ' + o.item)} · ${esc(o.customer)}</span></div>
             <div class="cl-acts"><button class="btn line" data-lqr="${o.id}">QR</button><a class="btn line" target="_blank" rel="noopener" href="${esc(KQR.wa({ ref: o.ref, customer: o.customer, notes: o.notes, link: roomUrl(o.room) }))}">💬 WhatsApp</a><button class="btn line" data-lpic="${o.id}">📷 Picture</button><button class="btn line" data-lcopy="${o.id}">Copy</button></div>
           </div>`).join('') || `<p class="muted">${f ? 'No order matches.' : 'No open orders.'}</p>`}</div>`;
       const inp = $('#clFind'); inp.addEventListener('input', () => { fm.lq = inp.value; fmIdle(); const pos = inp.selectionStart; renderForeman(); const n = $('#clFind'); n.focus(); n.setSelectionRange(pos, pos); });
@@ -404,6 +405,7 @@
         <p class="step">${stageName(t.stage)}${working ? ' · <span class="on">in progress</span>' : ''}</p>
         ${t.with ? `<p class="with">👥 Together with <b>${esc(t.with)}</b></p>` : ''}
         ${t.approved ? `<p class="approved">✓ <b>Customer approved this design</b> · ${new Date(t.approved).toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short' })}</p>` : ''}
+        ${t.deposit ? `<p class="approved">✓ <b>Deposit confirmed</b> · you can start</p>` : ''}
         <div class="tags"><span class="tag u-${o.urgency}">${o.urgency === 'normal' ? 'Normal' : '● ' + URG_NAME[o.urgency] + ' priority'}</span><span class="tag due">◷ Due ${fmtDay(new Date(o.deadline + 'T17:00'))}</span><span class="tag">Then: ${job.after ? stageName(job.after) : 'Delivery'}</span></div>
         ${o.notes ? `<div class="note">📝 ${esc(o.notes)}</div>` : ''}
         ${pics.length ? `<div class="pics"><p class="k">📐 What to make · tap to see big</p><div class="pics-row">${pics.map((u, i) => `<button class="pic" data-pic="${i}"><img src="${esc(u)}" alt="Picture ${i + 1}"></button>`).join('')}</div></div>` : ''}

@@ -62,11 +62,12 @@
   $('#outBtn').onclick = async () => { await db.auth.signOut(); location.reload(); };
 
   /* ---------- load everything ---------- */
+  const tms = v => v ? new Date(v).getTime() : null;
   async function load(){
     if (busy) return; busy = true;
     try {
       const since = new Date(Date.now() - 30 * 864e5).toISOString();
-      const [w, o, l, wb, mt, mv, sd, tl, tc, tm, ln, hc, rq] = await Promise.all([
+      const [w, o, l, wb, mt, mv, sd, tl, tc, tm, ln, hc, rq, py] = await Promise.all([
         db.from('ws_workers').select('id,name,stage,active,task_id,locked_until,created_at,away_on,covers,arrived_on,arrived_at').order('name'),
         db.from('ws_orders').select('*').or('delivered_at.is.null,delivered_at.gt.' + since).order('created_at', { ascending:false }).limit(400),
         db.from('ws_log').select('*').order('id', { ascending:false }).limit(60),
@@ -79,7 +80,8 @@
         db.from('ws_tool_missing').select('*').order('id', { ascending:false }).limit(300),
         db.from('ws_tool_loans').select('*').order('id', { ascending:false }).limit(300),
         db.rpc('ws_has_foreman_pin'),
-        db.from('custom_requests').select('*').in('status', ['new','contacted','quoted']).order('created_at', { ascending:false }).limit(100)
+        db.from('custom_requests').select('*').in('status', ['new','contacted','quoted']).order('created_at', { ascending:false }).limit(100),
+        db.rpc('ws_pay_settings')
       ]);
       if (w.error || o.error || l.error) throw (w.error || o.error || l.error);
       const ids = o.data.map(x => x.id);
@@ -89,6 +91,7 @@
       S.workers = w.data.map(x => ({ id:x.id, name:x.name, stage:x.stage, active:x.active, task:x.task_id, covers:x.covers || [], away: !!x.away_on && String(x.away_on).slice(0, 10) === today, arrived: !!x.arrived_on && String(x.arrived_on).slice(0, 10) === today, arrivedAt: x.arrived_at ? new Date(x.arrived_at).getTime() : null, locked: x.locked_until && new Date(x.locked_until) > new Date() })).map(w => Object.assign(w, { here: w.active && w.arrived && !w.away }));
       S.web = wb.error ? [] : wb.data;
       S.reqs = rq && !rq.error ? rq.data : [];
+      S.pay = py && !py.error ? (py.data || {}) : null;   // null = update-18 not run yet
       S.mats = mt.error ? [] : mt.data.map(x => ({ id:x.id, name:x.name, unit:x.unit, store:+x.in_store, low:+x.low_at, counted: x.counted !== false, active:x.active, stages:x.stages || [] }));
       S.moves = mv.error ? [] : mv.data.map(x => ({ id:x.id, at:new Date(x.at).getTime(), mat:x.material_id, kind:x.kind, qty:+x.qty, order:x.order_id, worker:x.worker_id, note:x.note }));
       S.tools = tl.error ? [] : tl.data.map(x => ({ id:x.id, name:x.name, worker:x.usual_worker, active:x.active, stages:x.stages || [] }));
@@ -97,7 +100,8 @@
       S.hasCode = hc.error ? null : !!hc.data;
       S.toolMissing = tm.error ? [] : tm.data.map(x => ({ tool:x.tool_id, worker:x.worker_id, since:String(x.since).slice(0, 10), found: !!x.found_at }));
       S.std = sd.error ? [] : sd.data.map(x => ({ product:x.product, mat:x.material_id, per:+x.per_piece }));
-      S.orders = o.data.map(x => ({ id:x.id, ref:x.ref, src:x.source_order_id || null, srcNo:x.source_no || null, customer:x.customer, item:x.item, qty:x.qty, deadline:new Date(x.deadline + 'T17:00'), dl:String(x.deadline).slice(0, 10), urgency:x.urgency, notes:x.notes, stages:x.stages, delivered: !!x.delivered_at, createdAt: new Date(x.created_at).getTime(), by: x.created_by || 'owner', reqId: x.request_id || null, room: x.room_code || null, approvedAt: x.approved_at ? new Date(x.approved_at).getTime() : null, delOn: x.delivery_on ? String(x.delivery_on).slice(0, 10) : null, delPlace: x.delivery_place || '', delNote: x.delivery_note || '', deliveredAt: x.delivered_at ? new Date(x.delivered_at).getTime() : null }));
+      S.orders = o.data.map(x => ({ id:x.id, ref:x.ref, src:x.source_order_id || null, srcNo:x.source_no || null, customer:x.customer, item:x.item, qty:x.qty, deadline:new Date(x.deadline + 'T17:00'), dl:String(x.deadline).slice(0, 10), urgency:x.urgency, notes:x.notes, stages:x.stages, delivered: !!x.delivered_at, createdAt: new Date(x.created_at).getTime(), by: x.created_by || 'owner', reqId: x.request_id || null, room: x.room_code || null, approvedAt: x.approved_at ? new Date(x.approved_at).getTime() : null, delOn: x.delivery_on ? String(x.delivery_on).slice(0, 10) : null, delPlace: x.delivery_place || '', delNote: x.delivery_note || '', deliveredAt: x.delivered_at ? new Date(x.delivered_at).getTime() : null,
+        hold: !!x.on_hold, invoiceAt: tms(x.invoice_at), depCode: x.dep_code || null, depClaimed: tms(x.dep_claimed_at), depOk: tms(x.dep_ok_at), balCode: x.bal_code || null, balClaimed: tms(x.bal_claimed_at), paidAt: tms(x.paid_at) }));
       S.tasks = t.data.map(x => ({ id:x.id, order:x.order_id, step:x.step, stage:x.stage, status:x.status, worker:x.worker_id, rank:x.rank, withPrev: !!x.with_prev, doneAt: x.done_at ? new Date(x.done_at).getTime() : null, planned: Array.isArray(x.planned) ? x.planned : String(x.planned || '').replace(/[{}]/g, '').split(',').filter(Boolean),
         problem: x.problem_at ? { reason:x.problem_reason, at:new Date(x.problem_at).getTime(), stopped:!!x.problem_stopped, ack: !!x.problem_ack_at } : null }));
       S.log = l.data.map(x => ({ id:x.id, text:x.text, kind:x.kind, at:new Date(x.at).getTime(), order:x.order_id }));
@@ -268,6 +272,11 @@
       ${VOICE.lang !== 'off' && voicesFor(VOICE.lang).length ? `<label class="field" style="margin-top:12px"><span>Which voice</span><select id="vName">${voicesFor(VOICE.lang).map(v => `<option value="${esc(v.name)}" ${pickVoice(VOICE.lang) === v ? 'selected' : ''}>${esc(v.name.replace(/^Microsoft /,'').replace(/ - .*$/,'').replace(/ Online \(Natural\)/,' (natural)'))} · ${esc(v.lang)}</option>`).join('')}</select></label>` : ''}
       <label style="display:flex;gap:8px;align-items:center;margin:12px 0"><input type="checkbox" id="vSmall" ${VOICE.small ? 'checked' : ''} style="accent-color:var(--green);width:18px;height:18px"> Also read small updates (job finished, worker waiting)</label>
       <button class="btn line" id="vTest">Test voice</button>
+      ${S.pay !== null ? `<p class="section-title">💳 Payments</p>
+      <p class="sub" style="margin-bottom:10px">Clients see this in their Order Room after you send the invoice. No amounts are ever saved.</p>
+      <div class="row2"><label class="field"><span>M-Pesa number clients pay to</span><input id="payPh" inputmode="tel" placeholder="0712 345 678" value="${esc((S.pay.phone || '').replace(/^254/, '0'))}"></label>
+        <label class="field"><span>Name M-Pesa shows</span><input id="payNm" placeholder="e.g. JANE WANJIRU" value="${esc(S.pay.name || '')}"></label></div>
+      <button class="btn line" id="paySave">Save payment number</button>` : ''}
       <p class="section-title">📱 On your phone</p>
       <p class="sub" style="margin-bottom:0">You stay signed in on this phone. To get an app icon: open the browser menu (⋮) and tap <b>Add to Home screen</b>.</p>
       <p class="section-title">⇄ Switch</p>
@@ -304,7 +313,7 @@
     const delivered = S.orders.filter(o => o.delivered).filter(bySrc);
     const row = o => { const p = orderProgress(o); const late = !p.finished && isLate(o.deadline);
       return `<button class="order" data-open="${o.id}">
-        <div><div class="ref">${o.ref} <span class="pill p-${o.urgency}">${URG_NAME[o.urgency]}</span>${o.srcNo ? ` <span class="pill p-web">🌐 ${esc(o.srcNo)}</span>` : ''}${o.by === 'manager' ? ' <span class="pill p-mgr">👤 Manager</span>' : ''}${o.reqId ? ' <span class="pill p-web">📝 Quote</span>' : ''}${o.approvedAt ? ' <span class="pill p-done">✓ Approved</span>' : ''}</div><div style="color:var(--muted);font-size:13px">${o.qty} × ${esc(o.item)} · ${esc(o.customer)}</div></div>
+        <div><div class="ref">${o.ref} <span class="pill p-${o.urgency}">${URG_NAME[o.urgency]}</span>${o.srcNo ? ` <span class="pill p-web">🌐 ${esc(o.srcNo)}</span>` : ''}${o.by === 'manager' ? ' <span class="pill p-mgr">👤 Manager</span>' : ''}${o.reqId ? ' <span class="pill p-web">📝 Quote</span>' : ''}${o.approvedAt ? ' <span class="pill p-done">✓ Approved</span>' : ''}${payPill(o)}</div><div style="color:var(--muted);font-size:13px">${o.qty} × ${esc(o.item)} · ${esc(o.customer)}</div></div>
         ${pipe(o)}
         <div class="due ${late && !o.delivered ? 'late' : ''}">${o.delivered ? 'Delivered' : p.finished ? '<span class="pill p-done">Ready</span>' : 'Due ' + fmtDay(o.deadline)}</div>
       </button>`; };
@@ -313,8 +322,13 @@
     const srcTab = (id, label, n, hint) => `<button class="src-tab ${orderSrc === id ? 'on' : ''}" data-osrc="${id}"><b>${label}</b>${n != null ? `<span>${n}</span>` : ''}${hint ? `<small>${hint}</small>` : ''}</button>`;
     const srcTabs = `<div class="src-tabs">${srcTab('online', '🌐 From clients', nOnline + waitingIn, waitingIn ? `${waitingIn} waiting for you` : 'Website orders, quotes & photos')}${srcTab('shop', '🏪 In the shop', nShop, 'Made by you or the manager')}${srcTab('all', 'All', openAll.length, '')}</div>`;
     const emptyMsg = orderFilter ? 'None right now. ✓' : orderSrc === 'online' ? 'No open orders from clients.' : orderSrc === 'shop' ? 'No open shop orders. Tap <b>+ New order</b> to add one.' : 'No open orders. Tap <b>+ New order</b> to add one.';
+    const toCheck = S.orders.filter(o => !o.delivered && payClaim(o));
     return `
       ${srcTabs}
+      ${toCheck.length ? `<div class="webbox paycheck"><p class="section-title" style="margin-top:0">💳 Payments to check · ${toCheck.length}</p>
+        <div class="list">${toCheck.map(o => { const c = payClaim(o); return `<button class="order webrow" data-open="${o.id}">
+          <div><div class="ref">${esc(o.ref)} · ${esc(o.customer)}</div><div style="color:var(--muted);font-size:13px">Says ${c.part === 'half' ? 'half is paid' : o.depOk ? 'the balance is paid' : 'it is all paid'} · ${ago(c.at)}</div></div>
+          <div class="webitems">M-Pesa code<br><b class="mcode">${esc(c.code)}</b></div><span class="btn sm">Check</span></button>`; }).join('')}</div></div>` : ''}
       ${web.length ? `<div class="webbox"><p class="section-title" style="margin-top:0">🌐 New from the website · ${web.length}</p>
         <div class="list">${web.map(w => `<button class="order webrow" data-web="${w.id}">
           <div><div class="ref">${esc(w.order_no)}</div><div style="color:var(--muted);font-size:13px">${esc(w.customer_name)} · ${ago(new Date(w.created_at).getTime())}</div></div>
@@ -344,7 +358,7 @@
           <p class="q-label">UP NEXT</p>
           ${q.length ? q.map((t, i) => { const o = O(t.order); if (!o) return ''; return `<div class="q">
             <span class="num">${i + 1}</span>
-            <div class="grow"><b>${o.ref} <span class="pill p-${o.urgency}">${URG_NAME[o.urgency]}</span></b>${o.qty} × ${esc(o.item)} · due ${fmtDay(o.deadline).toLowerCase()}</div>
+            <div class="grow"><b>${o.ref} <span class="pill p-${o.urgency}">${URG_NAME[o.urgency]}</span>${o.hold ? ' <span class="pill p-hold">⏳ Waiting for deposit</span>' : ''}</b>${o.qty} × ${esc(o.item)} · due ${fmtDay(o.deadline).toLowerCase()}</div>
             <button class="mini" data-up="${t.id}" ${i === 0 ? 'disabled' : ''} aria-label="Move up">▲</button>
             <button class="mini" data-down="${t.id}" ${i === q.length - 1 ? 'disabled' : ''} aria-label="Move down">▼</button>
           </div>`; }).join('') : '<p class="s" style="color:var(--muted);font-size:13px">Nothing waiting.</p>'}
@@ -635,6 +649,18 @@
     const pl = e.target.closest('[data-plan]'); if (pl) return planModal(pl.dataset.plan);
     const rqb = e.target.closest('[data-req]'); if (rqb) return requestModal(rqb.dataset.req);
     const rc = e.target.closest('[data-rcopy]'); if (rc){ const o = O(rc.dataset.rcopy); try { await navigator.clipboard.writeText(roomLink(o)); toast('Link copied. Paste it in WhatsApp or SMS.'); } catch(x){ prompt('Copy this link:', roomLink(o)); } return; }
+    const pinv = e.target.closest('[data-pinv]'); if (pinv){ const id = pinv.dataset.pinv; setTimeout(() => payAct('ws_invoice_sent', { p_order: id }, 'Invoice marked as sent. The client sees the payment steps in their Order Room.', id), 400); return; }
+    const pinm = e.target.closest('[data-pinvmark]'); if (pinm) return payAct('ws_invoice_sent', { p_order: pinm.dataset.pinvmark }, 'Invoice marked as sent', pinm.dataset.pinvmark);
+    const pok = e.target.closest('[data-pok]'); if (pok && !pok.disabled){ pok.disabled = true; const o = O(pok.dataset.po);
+      return payAct('ws_pay_ok', { p_order: pok.dataset.po, p_part: pok.dataset.pok }, pok.dataset.pok === 'half' ? `${o ? o.ref : 'Order'}: half payment confirmed${o && o.hold ? '. The workshop can start.' : ''}` : `${o ? o.ref : 'Order'}: fully paid ✓`, pok.dataset.po); }
+    const pno = e.target.closest('[data-pno]'); if (pno && !pno.disabled){ pno.disabled = true; return payAct('ws_pay_not_found', { p_order: pno.dataset.po, p_part: pno.dataset.pno }, 'The client is asked to check the code', pno.dataset.po); }
+    const pun = e.target.closest('[data-pundo]'); if (pun) return payAct('ws_pay_undo', { p_order: pun.dataset.po, p_part: pun.dataset.pundo }, 'Undone', pun.dataset.po);
+    const pnh = e.target.closest('[data-pnohold]'); if (pnh) return payAct('ws_hold', { p_order: pnh.dataset.pnohold, p_hold: false }, 'The workshop can start this order now', pnh.dataset.pnohold);
+    const phd = e.target.closest('[data-phold]'); if (phd) return payAct('ws_hold', { p_order: phd.dataset.phold, p_hold: true }, 'This order now waits for the half payment', phd.dataset.phold);
+    if (e.target.closest('#paySetGo')) return settingsModal();
+    const psv = e.target.closest('#paySave'); if (psv){ psv.disabled = true;
+      const { error } = await db.rpc('ws_set_pay', { p_phone: $('#payPh').value, p_name: $('#payNm').value }); psv.disabled = false;
+      if (error) return toast(errMsg(error)); toast('Payment number saved ✓'); await load(); return; }
     const rpic = e.target.closest('[data-rpic]'); if (rpic && !rpic.disabled) return sendPic(O(rpic.dataset.rpic), rpic);
     const rqr = e.target.closest('[data-rqr]'); if (rqr) return qrModal(O(rqr.dataset.rqr));
     const ru = e.target.closest('[data-runap]'); if (ru){ const { error } = await db.rpc('ws_room_unapprove', { p_order: ru.dataset.runap }); if (error) return toast(errMsg(error)); toast('Approval removed. Ask the customer to approve again.'); await load(); return orderModal(ru.dataset.runap); }
@@ -655,7 +681,9 @@
     if (b.dataset.tabgo){ closeModal(); tab = b.dataset.tabgo; orderFilter = null; enter = true; render(); window.scrollTo(0,0); }
     else if (b.dataset.open) orderModal(b.dataset.open);
     else if (b.dataset.solve){ b.disabled = true; closeModal(); await act('ws_solve', { p_task: b.dataset.solve }, 'Marked solved'); }
-    else if (b.dataset.deliver){ b.disabled = true; closeModal(); await act('ws_deliver', { p_order: b.dataset.deliver }, 'Marked delivered'); }
+    else if (b.dataset.deliver){ const od = O(b.dataset.deliver);
+      if (od && S.pay !== null && !od.paidAt){ toast('Confirm "Fully paid" first. Then mark it delivered.'); orderModal(od.id); setTimeout(() => document.querySelector('.pay-box')?.scrollIntoView({ block:'center', behavior:'smooth' }), 80); return; }
+      b.disabled = true; closeModal(); await act('ws_deliver', { p_order: b.dataset.deliver }, 'Marked delivered'); }
     else if (b.dataset.up || b.dataset.down){ b.disabled = true; await act('ws_move', { p_task: b.dataset.up || b.dataset.down, p_up: !!b.dataset.up }); }
   });
 
@@ -956,6 +984,7 @@
         <div class="nf-pics"><label class="btn sm line">＋ Add pictures<input type="file" accept="image/*" multiple id="fPics" hidden></label><div class="ph-grid" id="fPicsGrid"></div></div>
         <small style="color:var(--muted)">The customer's sample, a sketch, the colour. Workers see these on their job card.</small></div>
       <div class="field"><span>Steps and who does them</span>${stepPeople(true)}</div>
+      ${S.pay !== null ? `<label class="hold-pick"><input type="checkbox" id="fHold" checked> <span><b>Wait for the half payment</b><small>The workshop starts after you confirm the deposit. Untick if they paid already or don't need to.</small></span></label>` : ''}
       <p id="fErr" style="color:var(--red);min-height:20px;font-size:13px"></p>
       <div class="actions"><button class="btn line" data-x>Cancel</button><button class="btn" id="fSave">Add to workshop</button></div>`);
     let urg = 'normal'; bindStepPeople(s);
@@ -973,8 +1002,13 @@
       const btn = s.querySelector('#fSave'); btn.disabled = true; btn.textContent = 'Adding…';
       const { data, error } = await db.rpc('ws_create_order', { p: { customer, item, qty, deadline: s.querySelector('#fDate').value || null, urgency: urg, stages, people, together, notes: s.querySelector('#fNote').value.trim(), request_id: pre.req ? pre.req.id : null } });
       if (error){ btn.disabled = false; btn.textContent = 'Add to workshop'; s.querySelector('#fErr').textContent = errMsg(error); return; }
-      if (pics.length){ btn.textContent = 'Adding pictures…'; await load(); const no = S.orders.find(x => x.ref === data); if (no) for (const f of pics) await addPhoto(no, f, 'ref', true); }
+      const hb = s.querySelector('#fHold'), noWait = hb && !hb.checked;
+      if (pics.length || noWait){ btn.textContent = pics.length ? 'Adding pictures…' : 'Adding…'; await load(); const no = S.orders.find(x => x.ref === data);
+        if (no && noWait) await db.rpc('ws_hold', { p_order: no.id, p_hold: false });
+        if (no) for (const f of pics) await addPhoto(no, f, 'ref', true); }
       closeModal(); tab = 'orders'; await load();
+      const ho = S.orders.find(x => x.ref === data);
+      if (ho && ho.hold){ toast(`${data} added. It waits for the half payment: open it and send the invoice.`); return; }
       const o = S.orders.find(x => x.ref === data); const t = o && S.tasks.find(x => x.order === o.id && x.worker);
       const first = o && S.tasks.filter(x => x.order === o.id).sort((a, b) => a.step - b.step)[0];
       const wait = first && !first.worker && first.planned.length ? first.planned.map(id => W(id)?.name).filter(Boolean).join(' & ') : '';
@@ -1066,6 +1100,46 @@
     };
   }
 
+  /* ---------- payments: steps only, never amounts ---------- */
+  const payClaim = o => o.depClaimed && !o.depOk ? { part:'half', code:o.depCode, at:o.depClaimed } : o.balClaimed && !o.paidAt ? { part:'full', code:o.balCode, at:o.balClaimed } : null;
+  function payPill(o){
+    if (S.pay === null || o.delivered) return '';
+    if (payClaim(o)) return ' <span class="pill p-paycheck">💳 Check payment</span>';
+    if (o.paidAt) return ' <span class="pill p-done">✓ Paid</span>';
+    if (o.hold) return ' <span class="pill p-hold">⏳ Deposit</span>';
+    return '';
+  }
+  const payTo = () => S.pay && S.pay.phone ? `${S.pay.phone.replace(/^254/, '0').replace(/^(\d{4})(\d{3})(\d{3})$/, '$1 $2 $3')} (${S.pay.name})` : '';
+  function invoiceWa(o){
+    const first = String(o.customer || '').trim().split(/\s+/)[0];
+    const txt = `Hi ${first}, here is your invoice for ${o.ref} (${o.qty} × ${o.item}).\n\nTo start, please pay half by M-Pesa${payTo() ? ' to ' + payTo() : ''}.\nThen open your order room, tap "I've paid half" and type the M-Pesa code:\n${roomLink(o)}\n\nThank you! Kartech Engineering`;
+    return waRoom(o).replace(/\?text=.*$/, '?text=' + encodeURIComponent(txt));
+  }
+  const dShort = t => new Date(t).toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short' });
+  function payBox(o){
+    if (S.pay === null) return `<div class="pay-box off"><b>💳 Payment</b><small>Run <b>update-18-payments.sql</b> in Supabase to turn on invoices and payments.</small></div>`;
+    if (o.delivered && !o.paidAt && !o.invoiceAt) return '';
+    const step = (cls, title, body, acts) => `<li class="${cls}"><span class="pdot">${cls === 'done' ? '✓' : ''}</span><div class="pbody"><b>${title}</b>${body ? `<small>${body}</small>` : ''}${acts ? `<div class="pacts">${acts}</div>` : ''}</div></li>`;
+    const started = S.tasks.some(t => t.order === o.id && ['assigned','working','done'].includes(t.status));
+    const inv = o.invoiceAt ? step('done', 'Invoice sent', dShort(o.invoiceAt))
+      : step('now', 'Send the invoice', 'Make the invoice as usual (with the amounts). WhatsApp opens with the message ready: attach your invoice 📎 and send.',
+          `<a class="btn sm" target="_blank" rel="noopener" href="${esc(invoiceWa(o))}" data-pinv="${o.id}">📄 Send invoice on WhatsApp</a><button class="link-sm" data-pinvmark="${o.id}">Sent it another way? Mark as sent</button>`);
+    const claimActs = part => `<button class="btn sm" data-pok="${part}" data-po="${o.id}">✓ ${part === 'half' ? 'Half payment received' : 'Fully paid'}</button><button class="btn sm line" data-pno="${part}" data-po="${o.id}">Not received</button>`;
+    const half = o.depOk ? step('done', 'Half paid', `${dShort(o.depOk)} <button class="link-sm" data-pundo="half" data-po="${o.id}">Undo</button>`)
+      : o.depClaimed ? step('now check', 'Client says half is paid', `M-Pesa code <b class="mcode">${esc(o.depCode)}</b> · ${ago(o.depClaimed)}. Find this code in your M-Pesa messages.`, claimActs('half'))
+      : step(o.invoiceAt ? 'now' : '', 'Half paid', 'Waiting for the client.', `<button class="btn sm line" data-pok="half" data-po="${o.id}">✓ Half payment received</button>`);
+    const full = o.paidAt ? step('done', 'Fully paid', `${dShort(o.paidAt)}${o.delivered ? '' : ` <button class="link-sm" data-pundo="full" data-po="${o.id}">Undo</button>`}`)
+      : o.balClaimed ? step('now check', 'Client says the rest is paid', `M-Pesa code <b class="mcode">${esc(o.balCode)}</b> · ${ago(o.balClaimed)}. Find this code in your M-Pesa messages.`, claimActs('full'))
+      : step(o.depOk ? 'now' : '', 'Fully paid', 'Needed before delivery.', `<button class="btn sm line" data-pok="full" data-po="${o.id}">✓ Fully paid</button>`);
+    return `<div class="pay-box">
+      <div class="ph-head"><b>💳 Payment</b><small>Only you see this. No amounts are saved in the app.</small></div>
+      ${!S.pay.phone ? `<p class="pay-warn">Add the M-Pesa number clients pay to: <button class="link-sm" id="paySetGo">Settings → Payments</button></p>` : ''}
+      ${o.hold ? `<div class="pay-hold">⏳ <span><b>The workshop is waiting for the half payment.</b> Workers get this order after you confirm it.</span><button class="link-sm" data-pnohold="${o.id}">Start without payment</button></div>`
+        : !o.depOk && !o.delivered && !started ? `<div class="pay-hold soft"><span>Work can start before the half payment.</span><button class="link-sm" data-phold="${o.id}">Wait for the half payment</button></div>` : ''}
+      <ol class="pay-steps">${inv}${half}${full}</ol></div>`;
+  }
+  async function payAct(fn, args, msg, orderId){ const ok = await act(fn, args, msg); if (ok && O(orderId)) orderModal(orderId); }
+
   function orderModal(id){
     const o = O(id); if (!o) return; const p = orderProgress(o);
     const ts = o.stages.map(st => S.tasks.find(t => t.order === o.id && t.stage === st)).filter(Boolean);
@@ -1078,6 +1152,7 @@
       ${o.notes ? `<p style="margin:6px 0;padding:10px 12px;background:#fff;border:1px solid var(--line);border-radius:6px">📝 ${esc(o.notes)}</p>` : ''}
       <p class="${!p.finished && isLate(o.deadline) ? 'due late' : ''}" style="text-align:left">Deadline: ${fmtDay(o.deadline)}</p>
       ${!o.delivered ? `<div class="dl-line">🚚 ${o.delOn ? `Delivery <b>${esc(dayName(o.delOn))}</b>${o.delPlace ? ' · ' + esc(o.delPlace) : ''}${o.delNote ? ` <small>(${esc(o.delNote)})</small>` : ''}` : 'No delivery day yet'} <button class="btn sm line" data-dplan="${o.id}">${o.delOn ? 'Move' : 'Plan delivery'}</button></div>` : ''}
+      ${payBox(o)}
       <div style="margin:14px 0">${pipe(o)}</div>
       ${(() => { const use = orderUse(o); return use.length ? `<p class="section-title">Materials</p><div class="steps">${use.map(r => { const m = M(r.mat);
         return `<div class="step"><div style="flex:1"><b>${esc(m.name)}</b><div style="color:var(--muted);font-size:13px">Given ${n2(r.given)} ${esc(m.unit)}${r.normal != null ? ` · normal ${n2(r.normal)} ${esc(m.unit)}` : ''}</div></div>${r.over ? '<span class="pill p-attention">More than normal</span>' : r.normal != null ? '<span class="pill p-working">OK</span>' : ''}</div>`; }).join('')}</div>` : ''; })()}

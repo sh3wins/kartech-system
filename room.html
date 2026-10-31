@@ -63,6 +63,25 @@
   .toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%) translateY(20px);opacity:0;background:var(--forest);color:#fff;padding:12px 18px;border-radius:14px;font-size:14px;transition:all .25s;pointer-events:none;z-index:60;max-width:90vw;text-align:center}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
   .center{text-align:center;padding:40px 10px}
+  .pay{display:flex;flex-direction:column;gap:12px}
+  .pay-h{display:flex;justify-content:space-between;align-items:center}
+  .pay-h b{font-family:'Archivo',sans-serif;font-size:17px}
+  .psteps{list-style:none;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+  .psteps li{display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:var(--muted)}
+  .psteps li i{height:6px;border-radius:3px;background:var(--line)}
+  .psteps li.done i{background:var(--leaf)} .psteps li.now i{background:#D9A441}
+  .psteps li.done,.psteps li.now{color:var(--ink);font-weight:600}
+  .payto{background:var(--paper);border-radius:14px;padding:12px 14px;display:flex;align-items:center;gap:12px}
+  .payto div{flex:1;display:flex;flex-direction:column;gap:2px}
+  .payto small{font-size:12.5px;color:var(--muted)}
+  .payto b{font-family:'Archivo',sans-serif;font-size:22px;letter-spacing:.03em}
+  .payto span{font-size:13.5px;font-weight:600}
+  .copy{border:1.5px solid var(--line);background:#fff;border-radius:12px;padding:9px 12px;font-size:13.5px;font-weight:600;color:var(--forest)}
+  .note{font-size:14px;line-height:1.45;color:#5A4A2A;background:#FFF7E6;border-radius:12px;padding:10px 12px}
+  .note.good{background:var(--soft);color:var(--forest)}
+  .linkb{border:0;background:none;color:var(--leaf);font-weight:600;font-size:14px;text-decoration:underline;padding:4px}
+  .code-in{width:100%;height:58px;border:1.5px solid var(--line);border-radius:16px;padding:0 16px;font-size:22px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;background:#fff;font-family:ui-monospace,Menlo,Consolas,monospace}
+  .code-in:focus{outline:none;border-color:var(--leaf)}
   .hidden{display:none!important}
 </style>
 </head>
@@ -126,6 +145,8 @@
         ${R.approved_at ? `<div class="ok">${tick}<span><b>You approved the design</b> · ${esc(day(R.approved_at))}</span></div>` : ''}
       </section>
 
+      ${payCard()}
+
       ${R.approved_at || R.delivered ? '' : `<section class="card ask">
         <b style="font-family:'Archivo',sans-serif;font-size:17px">Check your design</b>
         <p>Before we start, make sure we have it exactly right: the photos and the details. Then tap approve.</p>
@@ -142,9 +163,57 @@
         : '<p class="empty">Ask anything or tell us a detail. Kartech will reply here.</p>'}</div>`;
     $('#composer').classList.remove('hidden');
     const rb = $('#reviewBtn'); if (rb) rb.onclick = review;
+    v.querySelectorAll('[data-paid]').forEach(b => b.onclick = () => paidSheet(b.dataset.paid));
+    const cp = $('#copyNum'); if (cp) cp.onclick = async () => { try { await navigator.clipboard.writeText(cp.dataset.n); toast('Number copied'); } catch(e){ toast(cp.dataset.n); } };
     $('#addTile').onclick = () => $('#photoIn').click();
     v.querySelectorAll('[data-pic]').forEach(b => b.onclick = () => full(+b.dataset.pic));
     const ms = $('#msgs'); if (ms && ms.lastElementChild) ms.lastElementChild.scrollIntoView({ block:'nearest' });
+  }
+
+  // ---------- payment: steps only, the amounts are on the invoice ----------
+  const niceNum = p => String(p || '').replace(/^\+?254/, '0').replace(/^(\d{4})(\d{3})(\d{3})$/, '$1 $2 $3');
+  function payCard(){
+    const p = R.pay; if (!p || !p.invoice && !p.dep_ok && !p.paid) return '';
+    const st = (on, now, label) => `<li class="${on ? 'done' : now ? 'now' : ''}"><i></i>${label}</li>`;
+    const where = p.phone ? `<div class="payto"><div><small>M-Pesa · Send money to</small><b>${esc(niceNum(p.phone))}</b><span>${esc(p.to || '')}</span></div><button class="copy" id="copyNum" data-n="${esc(niceNum(p.phone).replace(/\s/g, ''))}">Copy</button></div>`
+      : '<p class="sub">Kartech will tell you where to pay.</p>';
+    let body;
+    if (p.paid) body = `<div class="note good">✓ <b>Fully paid.</b> Thank you! We will tell you the delivery day.</div>`;
+    else if (p.bal_claimed) body = `<div class="note">⏳ <b>We are checking your payment</b> (M-Pesa code ${esc(p.bal_code || '')}). You will see ✓ here when it is confirmed.</div>`;
+    else if (p.dep_ok) body = `<div class="note good">✓ <b>Half paid.</b> Thank you! Please pay the rest before delivery.</div>${where}
+      <button class="btn" data-paid="full">I've paid the rest</button>`;
+    else if (p.dep_claimed) body = `<div class="note">⏳ <b>We are checking your payment</b> (M-Pesa code ${esc(p.dep_code || '')}). ${p.hold ? 'Work starts as soon as it is confirmed.' : 'You will see ✓ here when it is confirmed.'}</div>`;
+    else body = `<p class="sub" style="font-size:14.5px;color:var(--ink)">Your invoice was sent on WhatsApp. ${p.hold ? '<b>Pay half to start</b>: work begins when we confirm it.' : 'Please pay half.'}</p>${where}
+      <button class="btn" data-paid="half">I've paid half</button><button class="linkb" data-paid="full">I paid it all at once</button>`;
+    return `<section class="card pay">
+      <div class="pay-h"><b>Payment</b><span class="k">${p.paid ? 'DONE' : p.dep_ok ? 'STEP 2 OF 2' : 'STEP 1 OF 2'}</span></div>
+      <ol class="psteps">${st(p.invoice, false, 'Invoice')}${st(!!p.dep_ok, !p.dep_ok, 'Half paid')}${st(!!p.paid, !!p.dep_ok && !p.paid, 'Fully paid')}</ol>
+      ${body}</section>`;
+  }
+  function paidSheet(part){
+    const s = document.createElement('div'); s.className = 'sheet';
+    const what = part === 'half' ? 'half' : R.pay && R.pay.dep_ok ? 'the rest' : 'it all';
+    s.innerHTML = `<div>
+      <span class="k">${esc(R.ref)} · PAYMENT</span>
+      <h1 style="font-size:24px">You paid ${what}?</h1>
+      <p class="sub">Type the code from your M-Pesa SMS. It looks like <b>SJK7XQ2M4P</b>. Kartech checks it and confirms here.</p>
+      <input class="code-in" id="txn" maxlength="14" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="M-Pesa code">
+      <p class="sub" id="txnErr" style="color:var(--red);min-height:18px"></p>
+      <button class="btn green" id="txnGo">Send to Kartech</button>
+      <button class="btn line" id="txnNo" style="border:0;background:transparent">Not now</button>
+    </div>`;
+    document.body.appendChild(s);
+    const inp = s.querySelector('#txn'); setTimeout(() => inp.focus(), 60);
+    inp.addEventListener('input', () => { inp.value = inp.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); });
+    s.addEventListener('click', e => { if (e.target === s) s.remove(); });
+    s.querySelector('#txnNo').onclick = () => s.remove();
+    s.querySelector('#txnGo').onclick = async e => {
+      const c = inp.value.trim(); if (c.length < 8){ s.querySelector('#txnErr').textContent = 'Type the whole code from the SMS.'; return; }
+      e.currentTarget.disabled = true;
+      const { error } = await db.rpc('ws_room_paid', { p_code: code, p_part: part, p_txn: c });
+      if (error){ e.currentTarget.disabled = false; s.querySelector('#txnErr').textContent = errMsg(error); return; }
+      s.remove(); toast('Sent ✓ Kartech will check it and confirm here.'); lastJson = ''; load();
+    };
   }
 
   function full(i){
