@@ -277,6 +277,9 @@
       <div class="row2"><label class="field"><span>M-Pesa number clients pay to</span><input id="payPh" inputmode="tel" placeholder="0712 345 678" value="${esc((S.pay.phone || '').replace(/^254/, '0'))}"></label>
         <label class="field"><span>Name M-Pesa shows</span><input id="payNm" placeholder="e.g. JANE WANJIRU" value="${esc(S.pay.name || '')}"></label></div>
       <button class="btn line" id="paySave">Save payment number</button>` : ''}
+      ${window.KVoice ? `<p class="section-title">🎤 Type with your voice</p>
+      <p class="sub" style="margin-bottom:10px">Tap the 🎤 in any box and speak. Choose the language you speak in.</p>
+      <div class="seg" style="margin-bottom:6px">${[['en-KE','English'],['sw-KE','Kiswahili']].map(([v, l]) => `<button class="btn sm ${KVoice.getLang() === v ? '' : 'line'}" data-vlang="${v}">${l}</button>`).join(' ')}</div>` : ''}
       <p class="section-title">📱 On your phone</p>
       <p class="sub" style="margin-bottom:0">You stay signed in on this phone. To get an app icon: open the browser menu (⋮) and tap <b>Add to Home screen</b>.</p>
       <p class="section-title">⇄ Switch</p>
@@ -340,7 +343,8 @@
       <p class="sub">Most urgent first. Tap an order to see who's on it.</p>
       ${orderFilter ? `<p class="filter">Showing only <b>${orderFilter}</b> orders <button id="clearFilter">Show all ✕</button></p>` : ''}
       <div class="list">${active.length ? active.map(row).join('') : `<p class="empty">${emptyMsg}</p>`}</div>
-      ${delivered.length && !orderFilter ? `<p class="section-title">Delivered (last 30 days)</p><div class="list">${delivered.map(row).join('')}</div>` : ''}`;
+      ${delivered.length && !orderFilter ? `<p class="section-title">Delivered (last 30 days)</p><div class="list">${delivered.map(row).join('')}</div>` : ''}
+      <div class="bin-link"><button class="btn line sm" id="binOpen">🗑 Bin</button><small>Deleted orders, workers and pictures stay here for 30 days.</small></div>`;
   }
 
   function viewWorkshop(){
@@ -382,7 +386,8 @@
       <div class="fm-card anim"><span class="fm-ic">🔑</span><div class="grow"><b>Manager code</b><p>${S.hasCode ? 'Set. The manager uses it on the workshop screen to tick tools and materials.' : 'Not set yet. The manager needs it to open her page on the workshop screen.'}</p></div><button class="btn ${S.hasCode ? 'line' : ''}" data-fmcode>${S.hasCode ? 'Change code' : 'Set code'}</button></div>
       <div class="fm-card"><span class="fm-ic">🪜</span><div class="grow"><b>Workshop steps</b><p>${STAGES.map(x => esc(x.name)).join(' → ')}</p></div><button class="btn line" data-steps>Edit steps</button></div>
       ${STAGES.map(s => { const ws = S.workers.filter(w => w.stage === s.id); return `<p class="section-title">${s.name}${s.grp !== s.name ? ` <span class="grp-tag">${esc(s.grp)}</span>` : ''}</p>
-        <div class="list">${ws.length ? ws.map(row).join('') : '<p class="empty">No one in this step yet.</p>'}</div>`; }).join('')}`;
+        <div class="list">${ws.length ? ws.map(row).join('') : '<p class="empty">No one in this step yet.</p>'}</div>`; }).join('')}
+      <div class="bin-link"><button class="btn line sm" id="binOpen">🗑 Bin</button><small>Deleted orders, workers and pictures stay here for 30 days.</small></div>`;
   }
 
 
@@ -658,6 +663,20 @@
     const pnh = e.target.closest('[data-pnohold]'); if (pnh) return payAct('ws_hold', { p_order: pnh.dataset.pnohold, p_hold: false }, 'The workshop can start this order now', pnh.dataset.pnohold);
     const phd = e.target.closest('[data-phold]'); if (phd) return payAct('ws_hold', { p_order: phd.dataset.phold, p_hold: true }, 'This order now waits for the half payment', phd.dataset.phold);
     if (e.target.closest('#paySetGo')) return settingsModal();
+    if (e.target.closest('#binOpen')) return binModal();
+    const bb = e.target.closest('[data-binback]'); if (bb && !bb.disabled){ bb.disabled = true;
+      const { data, error } = await db.rpc('ws_bin_restore', { p_id: +bb.dataset.binback });
+      if (error){ bb.disabled = false; return toast(errMsg(error)); }
+      toast(data === 'picture' ? 'Picture is back ✓' : `${data} is back ✓`); await load(); return binModal(); }
+    const bf = e.target.closest('[data-binforget]'); if (bf && !bf.disabled){
+      if (!bf.classList.contains('sure')){ bf.classList.add('sure'); bf.textContent = 'Sure? Tap again'; setTimeout(() => { if (document.body.contains(bf)){ bf.classList.remove('sure'); bf.textContent = 'Delete for good'; } }, 4000); return; }
+      bf.disabled = true;
+      const { data, error } = await db.rpc('ws_bin_forget', { p_id: +bf.dataset.binforget });
+      if (error){ bf.disabled = false; return toast(errMsg(error)); }
+      const mine = (data || []).filter(f => f.b === PH_BUCKET && f.p).map(f => f.p);
+      if (mine.length && db.storage) try { await db.storage.from(PH_BUCKET).remove(mine); } catch(er) {}
+      toast('Deleted for good'); return binModal(); }
+    const vl = e.target.closest('[data-vlang]'); if (vl){ KVoice.setLang(vl.dataset.vlang); document.querySelectorAll('[data-vlang]').forEach(x => x.classList.toggle('line', x !== vl)); toast(vl.textContent + ' ✓'); return; }
     const psv = e.target.closest('#paySave'); if (psv){ psv.disabled = true;
       const { error } = await db.rpc('ws_set_pay', { p_phone: $('#payPh').value, p_name: $('#payNm').value }); psv.disabled = false;
       if (error) return toast(errMsg(error)); toast('Payment number saved ✓'); await load(); return; }
@@ -715,7 +734,7 @@
       if (error) return toast(errMsg(error));
       const row = data.find(x => String(x.id) === b.dataset.phrm);
       if (path && db.storage && (!row || (row.bucket || PH_BUCKET) === PH_BUCKET)) await db.storage.from(PH_BUCKET).remove([path]);
-      toast('Photo removed'); loadPhotos(orderId); };
+      toast('Picture moved to the 🗑 Bin'); loadPhotos(orderId); };
   }
   function shrink(file){
     return new Promise((ok, no) => { const img = new Image(), url = URL.createObjectURL(file);
@@ -1058,12 +1077,27 @@
     const del = s.querySelector('#eDel'); let sure = false;
     del.onclick = async () => {
       if (!sure){ sure = true; del.classList.remove('line'); del.textContent = 'Tap again to delete';
-        s.querySelector('#eErr').textContent = `This removes ${o.ref} from the workshop. Anyone working on it gets their next job.`; setTimeout(() => { if (document.body.contains(del) && sure){ sure = false; del.classList.add('line'); del.textContent = '🗑 Delete order'; s.querySelector('#eErr').textContent = ''; } }, 5000); return; }
+        s.querySelector('#eErr').textContent = `Tap again to delete. ${o.ref} goes to the 🗑 Bin for 30 days, so you can bring it back. Anyone working on it gets their next job.`; setTimeout(() => { if (document.body.contains(del) && sure){ sure = false; del.classList.add('line'); del.textContent = '🗑 Delete order'; s.querySelector('#eErr').textContent = ''; } }, 5000); return; }
       del.disabled = true; del.textContent = 'Deleting…';
       const { error } = await db.rpc('ws_delete_order', { p_order: o.id });
       if (error){ del.disabled = false; del.textContent = '🗑 Delete order'; s.querySelector('#eErr').textContent = /ws_delete_order/.test(errMsg(error)) ? 'Run update-9-edit-orders.sql in Supabase first.' : errMsg(error); return; }
-      closeModal(); toast(`${o.ref} deleted`); await load();
+      closeModal(); toast(`${o.ref} moved to the 🗑 Bin. You can bring it back for 30 days.`); await load();
     };
+  }
+
+  /* ---------- the Bin: deleted orders and pictures, kept 30 days ---------- */
+  async function binModal(){
+    const s = openModal(`<h3>🗑 Bin</h3><p class="sub">Deleted orders, workers and pictures stay here for 30 days. Then they are gone for good.</p><div id="binList"><p class="empty">Loading…</p></div>
+      <div class="actions"><button class="btn line" data-x>Close</button></div>`);
+    const { data, error } = await db.from('ws_bin').select('id, at, kind, label').order('id', { ascending:false });
+    const box = s.querySelector('#binList');
+    if (error) return box.innerHTML = `<p class="empty">${/ws_bin/.test(errMsg(error)) ? 'Run <b>update-21-bin.sql</b> in Supabase first.' : esc(errMsg(error))}</p>`;
+    const left = at => Math.max(0, 30 - Math.floor((Date.now() - new Date(at).getTime()) / 864e5));
+    box.innerHTML = (data || []).length ? `<div class="list">${data.map(b => `<div class="bin-row">
+        <span class="bin-ic">${b.kind === 'order' ? '📋' : b.kind === 'worker' ? '👷' : '🖼'}</span>
+        <div class="grow"><b>${esc(b.label)}</b><small>Deleted ${esc(ago(new Date(b.at).getTime()))} · ${left(b.at)} days left</small></div>
+        <button class="btn sm" data-binback="${b.id}">↩ Bring back</button><button class="btn sm line" data-binforget="${b.id}">Delete for good</button></div>`).join('')}</div>`
+      : '<p class="empty">The Bin is empty. ✓</p>';
   }
 
   function webModal(id){
@@ -1448,7 +1482,7 @@
       <p style="font-size:13px;color:var(--muted)">They go in on the workshop screen by tapping their name.</p>
       <p id="wErr" style="color:var(--red);min-height:20px;font-size:13px"></p>
       <div class="actions" style="justify-content:space-between">
-        ${w ? `<button class="btn ${!w.active ? '' : 'red'}" id="wToggle">${!w.active ? 'Switch back on' : 'Switch off'}</button>` : '<span></span>'}
+        ${w ? `<span style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ${!w.active ? '' : 'red'}" id="wToggle">${!w.active ? 'Switch back on' : 'Switch off'}</button><button class="btn red line" id="wDel">🗑 Delete</button></span>` : '<span></span>'}
         <span style="display:flex;gap:8px"><button class="btn line" data-x>Cancel</button><button class="btn" id="wSave">Save</button></span>
       </div>`);
     s.querySelector('#wSave').onclick = async () => {
@@ -1461,6 +1495,16 @@
     };
     const tg = s.querySelector('#wToggle');
     if (tg) tg.onclick = async () => { tg.disabled = true; closeModal(); await act('ws_set_worker_active', { p_worker: w.id, p_active: !w.active }, 'Saved'); };
+    const wd = s.querySelector('#wDel');
+    if (wd) wd.onclick = async () => {
+      if (!wd.classList.contains('sure')){ wd.classList.add('sure'); wd.textContent = 'Sure? Tap again';
+        s.querySelector('#wErr').textContent = `${w.name} goes to the 🗑 Bin for 30 days, so you can bring them back.${w.task ? ' Their job goes back in line.' : ''} Only away for a while? Use "Switch off" instead.`;
+        setTimeout(() => { if (document.body.contains(wd)){ wd.classList.remove('sure'); wd.textContent = '🗑 Delete'; s.querySelector('#wErr').textContent = ''; } }, 5000); return; }
+      wd.disabled = true;
+      const { error } = await db.rpc('ws_delete_worker', { p_worker: w.id });
+      if (error){ wd.disabled = false; s.querySelector('#wErr').textContent = /ws_delete_worker/.test(errMsg(error)) ? 'Run update-21-bin.sql in Supabase first.' : errMsg(error); return; }
+      closeModal(); toast(`${w.name} moved to the 🗑 Bin`); await load();
+    };
     if (!w) setTimeout(() => s.querySelector('#wName').focus(), 50);
   }
 

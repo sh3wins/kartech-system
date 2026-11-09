@@ -556,3 +556,12 @@ body.dash .toast{border-radius:12px;background:var(--forest)}
 .hold-pick input{width:18px;height:18px;margin-top:2px;accent-color:var(--deep,#185844)}
 .hold-pick span{display:flex;flex-direction:column;gap:2px}
 .hold-pick small{font-size:12.5px;color:var(--muted)}
+
+/* the Bin */
+.bin-link{display:flex;align-items:center;gap:10px;margin:22px 0 4px;color:var(--muted)}
+.bin-link small{font-size:12.5px}
+.bin-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;border-radius:12px;background:#fff;border:1px solid var(--line)}
+.bin-row .grow{flex:1;min-width:180px;display:flex;flex-direction:column;gap:2px}
+.bin-row small{font-size:12.5px;color:var(--muted)}
+.bin-ic{font-size:20px}
+.btn.sure{background:#B42318 !important;color:#fff !important;border-color:#B42318 !important}
