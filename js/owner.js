@@ -148,7 +148,7 @@
       items.push({ lvl:'amber', title:'Tool check not done yet tonight', sub:`The manager should check the tools at ${KT_CONFIG.toolCheckAt || '18:30'} on the workshop screen`, act:`<button class="btn sm line" data-tabgo="stock">See tools</button>` });
     STAGES.forEach(st => { const q = queue(st.id); if (!q.length) return;
       const can = S.workers.filter(w => w.here && (w.stage === st.id || w.covers.includes(st.id)));
-      if (!can.length) items.push({ lvl:'red', title:`Nobody in ${st.name} today`, sub:`${q.length} job${q.length > 1 ? 's' : ''} waiting. Pick someone to step up.`, act:`<button class="btn sm" data-give="${q[0].id}">Give to…</button>` }); });
+      if (!can.length) items.push({ lvl:'red', title:`Nobody in ${st.name} today`, sub:`${q.length} job${q.length > 1 ? 's' : ''} waiting. Pick someone to step up.`, act:`<button class="btn sm" data-stepsheet="${q[0].id}">Choose someone</button>` }); });
     const nb = new Date(new Date().toLocaleString('en-US', { timeZone:'Africa/Nairobi' }));
     const notIn = S.workers.filter(w => w.active && !w.arrived && !w.away);
     if (notIn.length && nb.getHours() >= 9 && nb.getHours() < 18) items.push({ lvl:'amber', title:`${notIn.length} worker${notIn.length > 1 ? 's' : ''} not ticked in yet`, sub:`${notIn.slice(0, 4).map(w => w.name).join(', ')}${notIn.length > 4 ? '…' : ''} · they get no jobs until the manager ticks them in`, act:`<button class="btn sm line" data-tabgo="workers">See workers</button>` });
@@ -347,33 +347,102 @@
       <div class="bin-link"><button class="btn line sm" id="binOpen">🗑 Bin</button><small>Deleted orders, workers and pictures stay here for 30 days.</small></div>`;
   }
 
-  function viewWorkshop(){
-    return `
-      <h2>Workshop</h2>
-      <p class="sub">Each step has its own line of jobs. When someone finishes, they get the top job automatically. Use ▲▼ to change the order.</p>
-      <div class="board">${STAGES.map(s => {
-        const ws = S.workers.filter(w => w.active && w.stage === s.id);
-        const q = queue(s.id);
-        return `<div class="col">
-          <h3>${s.name}</h3><p class="s">${ws.length} worker${ws.length === 1 ? '' : 's'} · ${q.length} waiting</p>
-          ${ws.map(w => { const [k, label] = workerStatus(w); const t = w.task && T(w.task); const o = t && O(t.order);
-            return `<div class="wk"><div class="n">${esc(w.name)} <span class="pill p-${k}">${label}</span></div>
-              <div class="c">${o ? `${o.ref} · ${o.qty} × ${esc(o.item)}${t.problem ? `<br><b style="color:var(--red)">⚠ ${esc(t.problem.reason)}</b> <button class="btn sm" style="margin-top:6px" data-solve="${t.id}">Mark solved</button>` : ''}` : 'Free. Will get the next job that arrives.'}</div></div>`; }).join('') || '<p class="s" style="color:var(--muted);font-size:13px">No workers in this step. Add one in Workers.</p>'}
-          <p class="q-label">UP NEXT</p>
-          ${q.length ? q.map((t, i) => { const o = O(t.order); if (!o) return ''; return `<div class="q">
-            <span class="num">${i + 1}</span>
-            <div class="grow"><b>${o.ref} <span class="pill p-${o.urgency}">${URG_NAME[o.urgency]}</span>${o.hold ? ' <span class="pill p-hold">⏳ Waiting for deposit</span>' : ''}</b>${o.qty} × ${esc(o.item)} · due ${fmtDay(o.deadline).toLowerCase()}</div>
-            <button class="mini" data-up="${t.id}" ${i === 0 ? 'disabled' : ''} aria-label="Move up">▲</button>
-            <button class="mini" data-down="${t.id}" ${i === q.length - 1 ? 'disabled' : ''} aria-label="Move down">▼</button>
-          </div>`; }).join('') : '<p class="s" style="color:var(--muted);font-size:13px">Nothing waiting.</p>'}
-        </div>`; }).join('')}</div>`;
+  /* ---------- WHO'S DOING WHAT: every order, its steps in a row. Tap a step → pick who. ---------- */
+  function canDo(w, stage){ return w.active && (w.stage === stage || (w.covers || []).includes(stage)); }
+  function chip(t, o){
+    const holders = S.workers.filter(w => w.task === t.id).map(w => w.name);
+    const plan = t.planned.map(id => W(id)?.name).filter(Boolean);
+    const here = S.workers.some(w => w.here && canDo(w, t.stage));
+    let cls = '', who = '', note = '';
+    if (t.status === 'done'){ cls = 'done'; who = t.worker && W(t.worker) ? W(t.worker).name : 'Done'; note = who === 'Done' ? '' : 'Done'; }
+    else if (t.status === 'assigned' || t.status === 'working'){ cls = 'now'; who = holders.join(' + ') || taskNames(t);
+      const extra = plan.filter(n => !holders.includes(n)); note = (t.status === 'working' ? 'Working now' : 'Has it, not started') + (extra.length ? ` · ${extra.join(' & ')} joins` : ''); }
+    else if (t.status === 'queued'){ who = plan.join(' + ') || 'Anyone free';
+      if (o.hold){ note = '⏳ Waiting for deposit'; }
+      else if (!plan.length && !here){ cls = 'pick'; who = 'Nobody here'; note = 'Tap to choose someone'; }
+      else note = 'Next: waiting for them to be free'; }
+    else { who = plan.join(' + ') || 'Anyone free'; note = 'Later'; }
+    if (t.problem){ cls += ' prob'; note = '⚠ ' + t.problem.reason; }
+    return `<button class="wd-st ${cls}" data-stepsheet="${t.id}">
+      <small>${t.status === 'done' ? '✓ ' : cls.startsWith('now') ? '● ' : ''}${esc(stageName(t.stage))}${t.withPrev ? ' <i title="same time as the step before">⇉</i>' : ''}</small>
+      <b>${esc(who)}</b><em>${esc(note)}</em></button>`;
   }
+  function viewWorkshop(){
+    const all = S.orders.filter(o => !o.delivered).sort((a,b) => URG[a.urgency] - URG[b.urgency] || a.deadline - b.deadline);
+    const open = all.filter(o => !orderProgress(o).finished), ready = all.filter(o => orderProgress(o).finished);
+    const here = S.workers.filter(w => w.here), notIn = S.workers.filter(w => w.active && !w.here);
+    return `
+      <h2>Who's doing what</h2>
+      <p class="sub">Tap any step to choose who does it. That's all.</p>
+      <div class="wd-here"><b>Here today (${here.length}):</b> ${here.length ? here.map(w => esc(w.name)).join(', ') : 'nobody yet'}${notIn.length ? ` <span>· Not in: ${notIn.map(w => esc(w.name)).join(', ')}</span>` : ''}</div>
+      <div class="wd-legend"><span><i class="l-done"></i>Done</span><span><i class="l-now"></i>Working now</span><span><i class="l-pick"></i>Needs you to choose</span><span><i class="l-later"></i>Next / later</span></div>
+      ${open.length ? open.map(o => { const ts = S.tasks.filter(t => t.order === o.id).sort((a,b) => a.step - b.step); const late = !orderProgress(o).finished && isLate(o.deadline);
+        return `<div class="wd-card"><div class="wd-top"><button class="wd-name" data-open="${o.id}"><b>${o.ref} · ${o.qty} × ${esc(o.item)}</b> <span>· ${esc(o.customer)}</span></button>
+          <span class="${late ? 'wd-late' : 'wd-due'}">${late ? '⚠ ' + fmtDay(o.deadline) : 'Due ' + fmtDay(o.deadline).toLowerCase()}</span></div>
+          <div class="wd-steps">${ts.map(t => chip(t, o)).join('')}</div></div>`; }).join('')
+        : '<p class="empty">Nothing in the workshop right now. Tap <b>+ New order</b> to add one.</p>'}
+      ${ready.length ? `<p class="section-title">✓ Finished, ready for delivery</p><div class="wd-ready">${ready.map(o => `<button class="wd-rd" data-open="${o.id}"><b>${o.ref}</b> ${o.qty} × ${esc(o.item)} · ${esc(o.customer)}</button>`).join('')}</div>` : ''}`;
+  }
+
+  // the one place to choose who does a step
+  function stepSheet(taskId){
+    const t = T(taskId); if (!t) return; const o = O(t.order); if (!o) return;
+    const holders = S.workers.filter(w => w.task === t.id).map(w => w.id);
+    let sel = [...new Set([...holders, ...t.planned])].filter(id => W(id)).slice(0, 2);
+    const state = w => !w.active ? 'switched off' : w.away ? 'away today' : !w.here ? 'not in yet' : w.task === t.id ? 'on this step' : w.task ? 'busy on ' + (O(T(w.task)?.order)?.ref || 'a job') : 'free';
+    const fit = S.workers.filter(w => w.active && canDo(w, t.stage)), others = S.workers.filter(w => w.active && !canDo(w, t.stage));
+    const nameBtn = w => `<button class="wd-nm ${sel.includes(w.id) ? 'on' : ''} ${state(w) === 'free' || state(w) === 'on this step' ? '' : 'dim'}" data-pick="${w.id}">${esc(w.name)}<small>${esc(stageName(w.stage))} · ${state(w)}</small></button>`;
+    const done = t.status === 'done';
+    const s = openModal(`<h3>${esc(stageName(t.stage))} · ${o.ref}</h3>
+      <p class="sub">${o.qty} × ${esc(o.item)} · ${esc(o.customer)}</p>
+      ${t.problem ? `<div class="wd-prob">⚠ <b>${esc(t.problem.reason)}</b><button class="btn sm" data-solve="${t.id}">Mark solved</button></div>` : ''}
+      ${done ? `<p class="wd-msg">✓ This step is done${t.worker && W(t.worker) ? ' (' + esc(W(t.worker).name) + ')' : ''}.</p>` : `
+      <p class="wd-q">Who should do it? <span>You can pick two.</span></p>
+      <div class="wd-names" id="wdNames">${fit.map(nameBtn).join('')}<button class="wd-nm any ${sel.length ? '' : 'on'}" data-pick="">Anyone free<small>first one who's free</small></button></div>
+      ${!fit.length ? '<p class="wd-msg">Nobody works in this step yet. Pick someone from another step below, or add a worker in Workers.</p>' : ''}
+      ${others.length ? `<details class="wd-more"${!fit.length ? ' open' : ''}><summary>Someone from another step</summary><div class="wd-names">${others.map(nameBtn).join('')}</div></details>` : ''}
+      ${o.hold ? '<p class="wd-msg">⏳ This order waits for the half payment. Your choice is saved and starts after the deposit.</p>' : ''}
+      <p id="wdErr" style="color:var(--red);min-height:18px;font-size:13px"></p>`}
+      <div class="actions" style="justify-content:space-between;flex-wrap:wrap">
+        ${done ? '<span></span>' : `<button class="btn line" id="wdDone">✓ Mark step done</button>`}
+        <span style="display:flex;gap:8px"><button class="btn line" data-x>${done ? 'Close' : 'Cancel'}</button>${done ? '' : '<button class="btn" id="wdSave">Save</button>'}</span>
+      </div>`);
+    if (done) return;
+    const paint = () => s.querySelectorAll('[data-pick]').forEach(b => b.classList.toggle('on', b.dataset.pick ? sel.includes(b.dataset.pick) : !sel.length));
+    s.addEventListener('click', e => { const b = e.target.closest('[data-pick]'); if (!b) return;
+      const id = b.dataset.pick;
+      if (!id) sel = []; else if (sel.includes(id)) sel = sel.filter(x => x !== id); else { sel.push(id); if (sel.length > 2) sel.shift(); }
+      paint(); });
+    s.querySelector('#wdSave').onclick = async () => {
+      const btn = s.querySelector('#wdSave'); btn.disabled = true; const err = s.querySelector('#wdErr'); err.textContent = '';
+      const nowHas = t.status === 'assigned' || t.status === 'working';
+      if (nowHas && sel.length && !sel.some(id => holders.includes(id))){
+        const g = await db.rpc('ws_give_task', { p_task: t.id, p_worker: sel[0] });
+        if (g.error){ btn.disabled = false; err.textContent = errMsg(g.error); return; }
+      }
+      const { error } = await db.rpc('ws_plan_step', { p_task: t.id, p_people: sel });
+      if (error){ btn.disabled = false; err.textContent = errMsg(error); return; }
+      closeModal();
+      const names = sel.map(id => W(id)?.name).filter(Boolean).join(' & ');
+      toast(names ? `${stageName(t.stage)} on ${o.ref}: ${names}${t.status === 'waiting' ? ' (when it’s their turn)' : ''}` : `${stageName(t.stage)} on ${o.ref}: anyone free`);
+      await load();
+    };
+    const dn = s.querySelector('#wdDone');
+    dn.onclick = async () => {
+      if (!dn.classList.contains('sure')){ dn.classList.add('sure'); dn.textContent = 'Sure? Tap again'; setTimeout(() => { if (document.body.contains(dn)){ dn.classList.remove('sure'); dn.textContent = '✓ Mark step done'; } }, 4000); return; }
+      dn.disabled = true;
+      const { error } = await db.rpc('ws_owner_done', { p_task: t.id });
+      if (error){ dn.disabled = false; s.querySelector('#wdErr').textContent = /ws_owner_done/.test(errMsg(error)) ? 'Run update-22-simple-assign.sql in Supabase first.' : errMsg(error); return; }
+      closeModal(); toast(`${o.ref} · ${stageName(t.stage)} marked done ✓`); await load();
+    };
+  }
+
 
   function viewWorkers(){
     const row = w => { const [k, l] = workerStatus(w); const t = w.task && T(w.task); const o = t && O(t.order);
       const nPlan = w.active ? S.tasks.filter(x => x.status !== 'done' && x.planned.includes(w.id) && x.worker !== w.id && O(x.order) && !O(x.order).delivered).length : 0;
-      return `<div class="item"><button class="grow w-open" data-wwork="${w.id}" ${w.active ? '' : 'disabled'}><div class="t">${esc(w.name)} <span class="pill p-${k}">${l}</span>${nPlan ? ` <span class="tog-tag">${nPlan} lined up</span>` : ''}</div>
-        <div class="s">${stageName(w.stage)}${w.covers.length ? ` · also ${w.covers.map(c => stageName(c).toLowerCase()).join(', ')}` : ''}${o ? ` · on ${o.ref}` : ''}${w.active ? ' · <span class="w-give">Give work ›</span>' : ''}</div></button>
+      return `<div class="item"><button class="grow w-open" data-editw="${w.id}"><div class="t">${esc(w.name)} <span class="pill p-${k}">${l}</span></div>
+        <div class="s">${stageName(w.stage)}${w.covers.length ? ` · also ${w.covers.map(c => stageName(c).toLowerCase()).join(', ')}` : ''}${o ? ` · on ${o.ref}` : ''}</div></button>
         ${w.active ? (w.here ? `<span class="in-chip">✓ In${w.arrivedAt ? ' ' + new Date(w.arrivedAt).toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' }) : ''}</span><button class="btn sm line away-btn" data-away="${w.id}" data-v="1">Away today</button>`
           : `<button class="btn sm away-btn" data-away="${w.id}" data-v="0">Mark in</button>${w.away ? '' : `<button class="btn sm line away-btn" data-away="${w.id}" data-v="1">Away</button>`}`) : ''}
         <button class="btn sm line" data-editw="${w.id}">Edit</button></div>`; };
@@ -650,8 +719,9 @@
     if (e.target.closest('[data-addtool]')) return toolModal();
     if (e.target.closest('[data-fmcode]')) return fmCodeModal();
     if (e.target.closest('[data-steps]')) return stepsModal();
-    const gv = e.target.closest('[data-give]'); if (gv) return giveModal(gv.dataset.give);
-    const pl = e.target.closest('[data-plan]'); if (pl) return planModal(pl.dataset.plan);
+    const ss = e.target.closest('[data-stepsheet]'); if (ss) return stepSheet(ss.dataset.stepsheet);
+    const gv = e.target.closest('[data-give]'); if (gv) return stepSheet(gv.dataset.give);
+    const pl = e.target.closest('[data-plan]'); if (pl) return stepSheet(pl.dataset.plan);
     const rqb = e.target.closest('[data-req]'); if (rqb) return requestModal(rqb.dataset.req);
     const rc = e.target.closest('[data-rcopy]'); if (rc){ const o = O(rc.dataset.rcopy); try { await navigator.clipboard.writeText(roomLink(o)); toast('Link copied. Paste it in WhatsApp or SMS.'); } catch(x){ prompt('Copy this link:', roomLink(o)); } return; }
     const pinv = e.target.closest('[data-pinv]'); if (pinv){ const id = pinv.dataset.pinv; setTimeout(() => payAct('ws_invoice_sent', { p_order: id }, 'Invoice marked as sent. The client sees the payment steps in their Order Room.', id), 400); return; }
@@ -1202,7 +1272,7 @@
         <label class="btn sm line ph-add">＋ Add photo<input type="file" accept="image/*" capture="environment" id="phIn" hidden></label></div>
         <div class="ph-grid" id="phGrid"><span class="ph-empty">Loading…</span></div></div>
       <p class="section-title">Steps</p>
-      <div class="steps">${ts.map(t => { const [k, l] = lbl(t); const w = t.worker && W(t.worker); const plan = t.planned.map(id => W(id)?.name).filter(Boolean).join(' & '); return `<div class="step"><div style="flex:1"><b>${stageName(t.stage)}</b>${t.withPrev ? ' <span class="tog-tag">⇉ same time as above</span>' : ''}<div style="color:var(--muted);font-size:13px">${w ? esc(taskNames(t)) + (x => x ? ` · ${esc(x)} joins when free` : '')(t.planned.filter(id => !S.workers.some(v => v.id === id && v.task === t.id)).map(id => W(id)?.name).filter(Boolean).join(' & ')) : plan ? '👤 For ' + esc(plan) : 'Whoever is free'}${t.problem ? ` · ⚠ ${esc(t.problem.reason)}` : ''}</div></div><span class="pill p-${k}">${l}</span>${t.problem ? `<button class="btn sm" data-solve="${t.id}">Solved</button>` : ''}${o.delivered || t.status === 'done' ? '' : t.worker ? `<button class="btn sm line" data-give="${t.id}">Change</button>` : `<button class="btn sm line" data-plan="${t.id}">👤 ${t.planned.length ? 'Change' : 'Pick'}</button>`}</div>`; }).join('')}</div>
+      <div class="steps">${ts.map(t => { const [k, l] = lbl(t); const w = t.worker && W(t.worker); const plan = t.planned.map(id => W(id)?.name).filter(Boolean).join(' & '); return `<div class="step"><div style="flex:1"><b>${stageName(t.stage)}</b>${t.withPrev ? ' <span class="tog-tag">⇉ same time as above</span>' : ''}<div style="color:var(--muted);font-size:13px">${w ? esc(taskNames(t)) + (x => x ? ` · ${esc(x)} joins when free` : '')(t.planned.filter(id => !S.workers.some(v => v.id === id && v.task === t.id)).map(id => W(id)?.name).filter(Boolean).join(' & ')) : plan ? '👤 For ' + esc(plan) : 'Whoever is free'}${t.problem ? ` · ⚠ ${esc(t.problem.reason)}` : ''}</div></div><span class="pill p-${k}">${l}</span>${t.problem ? `<button class="btn sm" data-solve="${t.id}">Solved</button>` : ''}${o.delivered || t.status === 'done' ? '' : `<button class="btn sm line" data-stepsheet="${t.id}">👤 Choose</button>`}</div>`; }).join('')}</div>
       ${!o.delivered && o.urgency !== 'urgent' && !p.finished ? `<p style="margin-top:14px;font-size:13px;color:var(--muted)">Customer pushing? Make it urgent and it jumps to the front of every line. No one's current job gets interrupted.</p>` : ''}
       <div class="actions">
         ${!o.delivered && o.urgency !== 'urgent' && !p.finished ? `<button class="btn red" id="mkUrgent">Make urgent</button>` : ''}
