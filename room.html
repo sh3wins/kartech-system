@@ -219,17 +219,17 @@
   // ONE card: only the next thing the client has to do
   function todoCard(){
     const p = R.pay, okHalf = p && p.dep_ok, okAll = p && p.paid;
-    const dots = p ? `<ol class="dots"><li class="${R.approved_at ? 'done' : 'now'}">Approve</li><li class="${okHalf ? 'done' : R.approved_at ? 'now' : ''}">Pay half</li><li class="${okAll ? 'done' : okHalf ? 'now' : ''}">Pay the rest</li></ol>` : '';
+    const dots = p ? `<ol class="dots"><li class="${R.approved_at ? 'done' : 'now'}">Approve</li><li class="${okHalf ? 'done' : R.approved_at ? 'now' : ''}">Deposit</li><li class="${okAll ? 'done' : okHalf ? 'now' : ''}">Pay the rest</li></ol>` : '';
     const where = p && p.phone ? `<div class="payto"><div><small>M-Pesa · Send money to</small><b>${esc(niceNum(p.phone))}</b><span>${esc(p.to || '')}</span></div><button class="copy" id="copyNum" data-n="${esc(niceNum(p.phone).replace(/\s/g, ''))}">Copy</button></div>` : '';
     const card = (cls, title, text, extra) => `<section class="card todo ${cls}">${dots}<h3>${title}</h3>${text ? `<p>${text}</p>` : ''}${extra || ''}</section>`;
     if (R.delivered) return card('done', '✓ Delivered', 'Thank you for choosing Kartech!');
     if (!R.approved_at) return card('ask', 'Check your design', 'Is everything right? Have a look before we start.', '<button class="btn green" id="reviewBtn">Check and approve</button>');
-    if (p && p.invoice && !okHalf && !p.dep_claimed && !p.bal_claimed) return card('pay', 'Pay half to start', 'Your invoice is on WhatsApp. When you have paid, tap the button.',
-      where + '<button class="btn" data-paid="half">I\'ve paid half</button><button class="linkb" data-paid="full">Paid everything? Tap here</button>');
+    if (p && p.invoice && !okHalf && !p.dep_claimed && !p.bal_claimed) return card('pay', 'Pay the deposit to start', 'Your invoice is on WhatsApp. When you have paid, tap the button.',
+      where + '<button class="btn" data-paid="half">I\'ve paid</button><button class="linkb" data-paid="full">Paid everything? Tap here</button>');
     if (p && (p.dep_claimed && !okHalf || p.bal_claimed && !okAll)) return card('wait', '⏳ Checking your payment', 'We will show ✓ here soon. You don\'t need to do anything.');
-    if (okHalf && !okAll) return card('pay', 'Pay the rest before delivery', 'Half is paid, thank you! When you have paid the rest, tap the button.',
+    if (okHalf && !okAll) return card('pay', 'Pay the rest before delivery', 'Deposit received, thank you! When you have paid the rest, tap the button.',
       where + '<button class="btn" data-paid="full">I\'ve paid the rest</button>');
-    return card('done', '✓ Nothing to do now', okAll ? 'Fully paid, thank you! We will tell you the delivery day here.' : 'We are making your order. Any question? Write to us below.');
+    return card('done', '✓ Nothing to do now', okAll ? 'Fully paid, thank you! Your receipt is on WhatsApp. We will tell you the delivery day here.' : 'We are making your order. Any question? Write to us below.');
   }
   function payCard(){
     const p = R.pay; if (!p || !p.invoice && !p.dep_ok && !p.paid) return '';

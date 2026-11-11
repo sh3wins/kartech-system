@@ -105,6 +105,10 @@
       S.tasks = t.data.map(x => ({ id:x.id, order:x.order_id, step:x.step, stage:x.stage, status:x.status, worker:x.worker_id, rank:x.rank, withPrev: !!x.with_prev, doneAt: x.done_at ? new Date(x.done_at).getTime() : null, planned: Array.isArray(x.planned) ? x.planned : String(x.planned || '').replace(/[{}]/g, '').split(',').filter(Boolean),
         problem: x.problem_at ? { reason:x.problem_reason, at:new Date(x.problem_at).getTime(), stopped:!!x.problem_stopped, ack: !!x.problem_ack_at } : null }));
       S.log = l.data.map(x => ({ id:x.id, text:x.text, kind:x.kind, at:new Date(x.at).getTime(), order:x.order_id }));
+      // invoices & receipts (owner only; null = update-23 not run yet)
+      const [fi, fp, fb] = await Promise.all([db.from('kt_invoices').select('*').order('created_at', { ascending:false }).limit(1000),
+        db.from('kt_payments').select('*').order('created_at', { ascending:true }).limit(3000), db.rpc('kt_business')]);
+      S.money = fi.error || fp.error ? null : { inv: fi.data, pays: fp.data, biz: fb.error ? {} : (fb.data || {}) };
       loaded = true;
       loadDay();
       announceChanges();
@@ -231,6 +235,35 @@
         ${box('waiting', 'In line', 'waiting for a worker', 'workshop', '◷')}
         ${box('working', 'In progress', 'being worked on', 'workshop', '▶')}
       </div>
+      <section class="kt-charts anim" style="--i:4" aria-label="Workshop performance charts">
+        <div class="kt-chart-panel">
+          <div class="kt-chart-head"><div><span class="kt-chart-kicker">WORKSHOP INSIGHTS</span><h3>Order health</h3><p>Current orders by progress</p></div><span class="kt-chart-tag">Live overview</span></div>
+          ${(() => {
+            const live = S.orders.filter(o => !o.delivered);
+            const groups = [
+              ['On track', live.filter(o => orderHealth(o)[0] === 'track').length, 'track'],
+              ['At risk', live.filter(o => orderHealth(o)[0] === 'risk').length, 'risk'],
+              ['Late', live.filter(o => orderHealth(o)[0] === 'late').length, 'late'],
+              ['Ready', live.filter(o => orderHealth(o)[0] === 'ready').length, 'ready']
+            ];
+            const total = live.length;
+            return `<div class="kt-chart-total"><strong>${total}</strong><span>undelivered orders</span></div><div class="kt-bars">${groups.map(([label, count, type]) => `<div class="kt-bar-row"><span>${label}</span><div class="kt-bar-track" role="img" aria-label="${label}: ${count} orders"><i class="kt-bar-fill kt-bar-${type}" style="--bar-width:${total ? Math.round(count / total * 100) : 0}%"></i></div><b>${count}</b></div>`).join('')}</div>`;
+          })()}
+        </div>
+        <div class="kt-chart-panel">
+          <div class="kt-chart-head"><div><span class="kt-chart-kicker">TASK PROGRESS</span><h3>Workshop completion</h3><p>Steps of the orders still open</p></div></div>
+          ${(() => {
+            const openIds = new Set(S.orders.filter(o => !o.delivered).map(o => o.id));
+            const tasks = S.tasks.filter(t => openIds.has(t.order));
+            const done = tasks.filter(t => t.status === 'done').length;
+            const working = tasks.filter(t => t.status === 'working' || t.status === 'assigned').length;
+            const queued = Math.max(0, tasks.length - done - working);
+            const total = tasks.length;
+            const pct = total ? Math.round(done / total * 100) : 0;
+            return `<div class="kt-progress-layout"><div class="kt-donut" role="img" aria-label="${pct}% of ${total} tasks completed" style="--pct:${pct}"><div class="kt-donut-inner"><strong>${pct}%</strong><span>complete</span></div></div><div class="kt-legend"><div><i class="kt-dot kt-done"></i><span>Completed</span><b>${done}</b></div><div><i class="kt-dot kt-working"></i><span>In progress</span><b>${working}</b></div><div><i class="kt-dot kt-queued"></i><span>Waiting</span><b>${queued}</b></div></div></div>`;
+          })()}
+        </div>
+      </section>
       <div class="d-grid">
         <div class="d-col">
           ${att.length ? `<div class="panel anim" style="--i:4"><div class="p-head"><h3>Needs you <span class="count">${att.length}</span></h3></div>
@@ -276,7 +309,12 @@
       <p class="sub" style="margin-bottom:10px">Clients see this in their Order Room after you send the invoice. No amounts are ever saved.</p>
       <div class="row2"><label class="field"><span>M-Pesa number clients pay to</span><input id="payPh" inputmode="tel" placeholder="0712 345 678" value="${esc((S.pay.phone || '').replace(/^254/, '0'))}"></label>
         <label class="field"><span>Name M-Pesa shows</span><input id="payNm" placeholder="e.g. JANE WANJIRU" value="${esc(S.pay.name || '')}"></label></div>
-      <button class="btn line" id="paySave">Save payment number</button>` : ''}
+      <button class="btn line" id="paySave">Save payment number</button>
+      ${S.money ? `<p class="sub" style="margin:16px 0 8px"><b>On the PDF invoices and receipts</b></p>
+      <div class="row2"><label class="field"><span>Kartech phone</span><input id="bizPh" inputmode="tel" value="${esc(String(S.money.biz.phone || '').replace(/^254/, '0'))}"></label>
+        <label class="field"><span>KRA PIN (optional)</span><input id="bizKra" value="${esc(S.money.biz.kra || '')}" placeholder="P051234567X" style="text-transform:uppercase"></label></div>
+      <label class="field"><span>Address</span><input id="bizAd" value="${esc(S.money.biz.address || '')}"></label>
+      <button class="btn line" id="bizSave">Save details</button>` : ''}` : ''}
       ${window.KVoice ? `<p class="section-title">🎤 Type with your voice</p>
       <p class="sub" style="margin-bottom:10px">Tap the 🎤 in any box and speak. Choose the language you speak in.</p>
       <div class="seg" style="margin-bottom:6px">${[['en-KE','English'],['sw-KE','Kiswahili']].map(([v, l]) => `<button class="btn sm ${KVoice.getLang() === v ? '' : 'line'}" data-vlang="${v}">${l}</button>`).join(' ')}</div>` : ''}
@@ -691,12 +729,14 @@
     requestAnimationFrame(step);
   }
 
+  /* MONEY: see the "INVOICES & RECEIPTS" section further down */
+
   function render(){
     document.querySelectorAll('.tabs [data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
     const n = attention().filter(a => a.lvl === 'red').length;
     $('#attnBadge').textContent = n || ''; $('#attnBadge').style.display = n ? '' : 'none';
     const v = $('#view');
-    v.innerHTML = tab === 'today' ? viewToday() : tab === 'orders' ? viewOrders() : tab === 'workers' ? viewWorkers() : tab === 'stock' ? viewStock() : tab === 'history' ? viewHistory() : viewWorkshop();
+    v.innerHTML = tab === 'today' ? viewToday() : tab === 'orders' ? viewOrders() : tab === 'workers' ? viewWorkers() : tab === 'stock' ? viewStock() : tab === 'finance' ? viewFinance() : tab === 'history' ? viewHistory() : viewWorkshop();
     v.classList.toggle('enter', enter);
     if (enter){ v.querySelectorAll('[data-count]').forEach(countUp); }
     else v.querySelectorAll('.kpi.pop [data-count]').forEach(countUp);
@@ -747,6 +787,9 @@
       if (mine.length && db.storage) try { await db.storage.from(PH_BUCKET).remove(mine); } catch(er) {}
       toast('Deleted for good'); return binModal(); }
     const vl = e.target.closest('[data-vlang]'); if (vl){ KVoice.setLang(vl.dataset.vlang); document.querySelectorAll('[data-vlang]').forEach(x => x.classList.toggle('line', x !== vl)); toast(vl.textContent + ' ✓'); return; }
+    const bsv = e.target.closest('#bizSave'); if (bsv){ bsv.disabled = true;
+      const { error } = await db.rpc('kt_set_business', { p_phone: $('#bizPh').value, p_address: $('#bizAd').value, p_kra: $('#bizKra').value }); bsv.disabled = false;
+      if (error) return toast(errMsg(error)); toast('Saved ✓'); await load(); return; }
     const psv = e.target.closest('#paySave'); if (psv){ psv.disabled = true;
       const { error } = await db.rpc('ws_set_pay', { p_phone: $('#payPh').value, p_name: $('#payNm').value }); psv.disabled = false;
       if (error) return toast(errMsg(error)); toast('Payment number saved ✓'); await load(); return; }
@@ -1204,44 +1247,214 @@
     };
   }
 
-  /* ---------- payments: steps only, never amounts ---------- */
+  /* ---------- INVOICES & RECEIPTS (owner only) ----------
+     One flow: make invoice → send PDF → client pays → owner confirms the amount →
+     receipt PDF goes out straight away → the order moves on by itself.
+     Any confirmed payment starts the workshop. Balance 0 = fully paid, "Delivered" unlocks. */
   const payClaim = o => o.depClaimed && !o.depOk ? { part:'half', code:o.depCode, at:o.depClaimed } : o.balClaimed && !o.paidAt ? { part:'full', code:o.balCode, at:o.balClaimed } : null;
+  const KSH = n => 'KSh ' + Number(n || 0).toLocaleString('en-KE', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  const invOf = o => S.money ? S.money.inv.find(i => i.order_id === o.id) : null;
+  const paysOf = inv => S.money && inv ? S.money.pays.filter(p => p.invoice_id === inv.id) : [];
+  const paidOf = inv => paysOf(inv).reduce((s, p) => s + Number(p.amount), 0);
+  const firstName = c => String(c || '').trim().split(/\s+/)[0];
+  const phoneOf = o => { const m = String(o.customer + ' ' + (o.notes || '')).match(/(?:\+?254|0)\s?[17]\d{2}\s?\d{3}\s?\d{3}/); return m ? m[0].replace(/\s/g, '') : ''; };
   function payPill(o){
     if (S.pay === null || o.delivered) return '';
     if (payClaim(o)) return ' <span class="pill p-paycheck">💳 Check payment</span>';
     if (o.paidAt) return ' <span class="pill p-done">✓ Paid</span>';
     if (o.hold) return ' <span class="pill p-hold">⏳ Deposit</span>';
+    if (o.depOk) return ' <span class="pill p-working">Deposit ✓</span>';
     return '';
   }
-  const payTo = () => S.pay && S.pay.phone ? `${S.pay.phone.replace(/^254/, '0').replace(/^(\d{4})(\d{3})(\d{3})$/, '$1 $2 $3')} (${S.pay.name})` : '';
-  function invoiceWa(o){
-    const first = String(o.customer || '').trim().split(/\s+/)[0];
-    const txt = `Hi ${first}, here is your invoice for ${o.ref} (${o.qty} × ${o.item}).\n\nTo start, please pay half by M-Pesa${payTo() ? ' to ' + payTo() : ''}.\nThen open your order room, tap "I've paid half" and type the M-Pesa code:\n${roomLink(o)}\n\nThank you! Kartech Engineering`;
-    return waRoom(o).replace(/\?text=.*$/, '?text=' + encodeURIComponent(txt));
-  }
   const dShort = t => new Date(t).toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short' });
+
   function payBox(o){
-    if (S.pay === null) return `<div class="pay-box off"><b>💳 Payment</b><small>Run <b>update-18-payments.sql</b> in Supabase to turn on invoices and payments.</small></div>`;
-    if (o.delivered && !o.paidAt && !o.invoiceAt) return '';
-    const step = (cls, title, body, acts) => `<li class="${cls}"><span class="pdot">${cls === 'done' ? '✓' : ''}</span><div class="pbody"><b>${title}</b>${body ? `<small>${body}</small>` : ''}${acts ? `<div class="pacts">${acts}</div>` : ''}</div></li>`;
+    if (S.pay === null) return `<div class="pay-box off"><b>💳 Payment</b><small>Run <b>update-18-payments.sql</b> in Supabase to turn on payments.</small></div>`;
+    if (!S.money) return `<div class="pay-box off"><b>💳 Invoices & receipts</b><small>Run <b>update-23-invoices-receipts.sql</b> in Supabase to make invoices and PDF receipts.</small></div>`;
+    const inv = invOf(o), pays = paysOf(inv), paid = paidOf(inv), bal = inv ? Number(inv.total) - paid : 0;
     const started = S.tasks.some(t => t.order === o.id && ['assigned','working','done'].includes(t.status));
-    const inv = o.invoiceAt ? step('done', 'Invoice sent', dShort(o.invoiceAt))
-      : step('now', 'Send the invoice', 'Make the invoice as usual (with the amounts). WhatsApp opens with the message ready: attach your invoice 📎 and send.',
-          `<a class="btn sm" target="_blank" rel="noopener" href="${esc(invoiceWa(o))}" data-pinv="${o.id}">📄 Send invoice on WhatsApp</a><button class="link-sm" data-pinvmark="${o.id}">Sent it another way? Mark as sent</button>`);
-    const claimActs = part => `<button class="btn sm" data-pok="${part}" data-po="${o.id}">✓ ${part === 'half' ? 'Half payment received' : 'Fully paid'}</button><button class="btn sm line" data-pno="${part}" data-po="${o.id}">Not received</button>`;
-    const half = o.depOk ? step('done', 'Half paid', `${dShort(o.depOk)} <button class="link-sm" data-pundo="half" data-po="${o.id}">Undo</button>`)
-      : o.depClaimed ? step('now check', 'Client says half is paid', `M-Pesa code <b class="mcode">${esc(o.depCode)}</b> · ${ago(o.depClaimed)}. Find this code in your M-Pesa messages.`, claimActs('half'))
-      : step(o.invoiceAt ? 'now' : '', 'Half paid', 'Waiting for the client.', `<button class="btn sm line" data-pok="half" data-po="${o.id}">✓ Half payment received</button>`);
-    const full = o.paidAt ? step('done', 'Fully paid', `${dShort(o.paidAt)}${o.delivered ? '' : ` <button class="link-sm" data-pundo="full" data-po="${o.id}">Undo</button>`}`)
-      : o.balClaimed ? step('now check', 'Client says the rest is paid', `M-Pesa code <b class="mcode">${esc(o.balCode)}</b> · ${ago(o.balClaimed)}. Find this code in your M-Pesa messages.`, claimActs('full'))
-      : step(o.depOk ? 'now' : '', 'Fully paid', 'Needed before delivery.', `<button class="btn sm line" data-pok="full" data-po="${o.id}">✓ Fully paid</button>`);
-    return `<div class="pay-box">
-      <div class="ph-head"><b>💳 Payment</b><small>Only you see this. No amounts are saved in the app.</small></div>
+    const claim = payClaim(o);
+    const hold = o.hold ? `<div class="pay-hold">⏳ <span><b>The workshop is waiting for a payment.</b> Workers get this order as soon as you confirm one.</span><button class="link-sm" data-pnohold="${o.id}">Start without payment</button></div>`
+      : !o.depOk && !o.delivered && !started ? `<div class="pay-hold soft"><span>Work can start before any payment.</span><button class="link-sm" data-phold="${o.id}">Wait for a payment</button></div>` : '';
+    const claimBox = claim ? `<div class="mo-claim"><span>💳 <b>${esc(firstName(o.customer))} says ${claim.part === 'half' ? 'they paid' : o.depOk ? 'they paid the rest' : 'they paid it all'}</b> · M-Pesa code <b class="mcode">${esc(claim.code)}</b> · ${ago(claim.at)}<br><small>Find this code in your M-Pesa messages, then record the amount.</small></span>
+        <span class="mo-acts">${inv ? `<button class="btn sm" data-mpay="${o.id}" data-mref="${esc(claim.code)}">Record this payment</button>` : ''}<button class="btn sm line" data-pno="${claim.part}" data-po="${o.id}">Not received</button></span></div>` : '';
+    if (!inv) return `<div class="pay-box">
+      <div class="ph-head"><b>💳 Invoice & payments</b><small>Only you see amounts. The manager and workers never do.</small></div>
       ${!S.pay.phone ? `<p class="pay-warn">Add the M-Pesa number clients pay to: <button class="link-sm" id="paySetGo">Settings → Payments</button></p>` : ''}
-      ${o.hold ? `<div class="pay-hold">⏳ <span><b>The workshop is waiting for the half payment.</b> Workers get this order after you confirm it.</span><button class="link-sm" data-pnohold="${o.id}">Start without payment</button></div>`
-        : !o.depOk && !o.delivered && !started ? `<div class="pay-hold soft"><span>Work can start before the half payment.</span><button class="link-sm" data-phold="${o.id}">Wait for the half payment</button></div>` : ''}
-      <ol class="pay-steps">${inv}${half}${full}</ol></div>`;
+      ${hold}${claimBox}
+      <div class="mo-empty"><span>No invoice yet.</span><button class="btn sm" data-minv="${o.id}">🧾 Make invoice</button></div>
+      ${o.paidAt ? '' : `<button class="link-sm mo-noinv" data-pok="full" data-po="${o.id}">No invoice needed? Mark as fully paid</button>`}</div>`;
+    return `<div class="pay-box">
+      <div class="ph-head"><b>💳 Invoice & payments</b><small>Only you see amounts. The manager and workers never do.</small></div>
+      ${hold}${claimBox}
+      <div class="mo-sum">
+        <div><small>${esc(inv.no)}</small><b>${KSH(inv.total)}</b><small>${inv.sent_at ? 'Sent ✓' : 'Not sent yet'}</small></div>
+        <div><small>Paid</small><b class="g">${KSH(paid)}</b></div>
+        <div><small>Balance</small><b class="${bal > 0 ? 'w' : 'g'}">${bal > 0 ? KSH(bal) : '✓ Fully paid'}</b></div>
+      </div>
+      <div class="mo-acts">
+        ${bal > 0 ? `<button class="btn sm" data-mpay="${o.id}">＋ Record payment</button>` : ''}
+        <button class="btn sm ${bal > 0 ? 'line' : ''}" data-msendinv="${inv.id}">📤 ${inv.sent_at ? 'Send invoice again' : 'Send invoice PDF'}</button>
+        <button class="btn sm line" data-minv="${o.id}">✏️ Edit invoice</button>
+      </div>
+      ${pays.length ? `<div class="mo-rcpts">${pays.map((p, i) => `<div class="mo-r"><span><b>${esc(p.no)} · ${KSH(p.amount)}</b><em>${esc(p.method)}${p.reference ? ' · ' + esc(p.reference) : ''}</em><small>${dShort(p.created_at)}${p.sent_at ? ' · sent ✓' : ''}</small></span>
+          <button class="btn sm ${p.sent_at ? 'line' : ''}" data-msendr="${p.id}">📤 ${p.sent_at ? 'Again' : 'Send receipt'}</button>
+          ${i === pays.length - 1 && new Date(p.created_at).toDateString() === new Date().toDateString() && !o.delivered ? `<button class="link-sm" data-mcancel="${p.id}">Cancel</button>` : ''}</div>`).join('')}</div>` : ''}
+    </div>`;
   }
+
+  // the invoice: lines with prices (owner only)
+  function invoiceModal(o){
+    const inv = invOf(o), paid = paidOf(inv);
+    const lines = inv ? inv.items.map(x => ({ desc:x.desc, qty:x.qty, price:x.price })) : [{ desc: o.item + (o.notes ? ' (' + String(o.notes).replace(/Phone:\s*\S+/i, '').trim().slice(0, 80) + ')' : '').replace(/\(\s*\)/, ''), qty: o.qty, price: '' }];
+    const lineRow = (x, i) => `<div class="mo-line" data-i="${i}"><input class="mo-d" placeholder="What (e.g. Bar stools, chrome legs)" value="${esc(x.desc)}"><input class="mo-q" type="number" min="1" step="1" inputmode="numeric" value="${esc(x.qty)}" aria-label="Quantity"><input class="mo-p" type="number" min="0" step="1" inputmode="decimal" placeholder="Price each" value="${esc(x.price)}" aria-label="Price each"><button type="button" class="mo-x" aria-label="Remove line">✕</button></div>`;
+    const s = openModal(`<h3>🧾 ${inv ? 'Edit invoice ' + esc(inv.no) : 'Make invoice'} · ${o.ref}</h3>
+      <p class="sub">${esc(o.customer)}. Only you see prices.</p>
+      <div class="mo-head"><span>What</span><span>Qty</span><span>Price each (KSh)</span><span></span></div>
+      <div id="moLines">${lines.map(lineRow).join('')}</div>
+      <button type="button" class="link-sm" id="moAdd">＋ Add a line (delivery, extra item…)</button>
+      <div class="row2" style="margin-top:12px"><label class="field"><span>Client's phone (for WhatsApp)</span><input id="moPh" inputmode="tel" value="${esc(inv ? inv.phone || '' : phoneOf(o))}" placeholder="0712 345 678"></label>
+        <label class="field"><span>Pay by (due date)</span><input id="moDue" type="date" value="${esc(inv ? inv.due_date || '' : o.dl || '')}"></label></div>
+      <div class="mo-total"><span>Total</span><b id="moTot">KSh 0</b></div>
+      ${paid ? `<p class="sub">Already paid: ${KSH(paid)}. The total can't go below that.</p>` : ''}
+      <p id="moErr" style="color:var(--red);min-height:18px;font-size:13px"></p>
+      <div class="actions"><button class="btn line" data-x>Cancel</button><button class="btn" id="moSave">${inv ? 'Save changes' : 'Make invoice'}</button></div>`);
+    const box = s.querySelector('#moLines');
+    const read = () => [...box.querySelectorAll('.mo-line')].map(r => ({ desc: r.querySelector('.mo-d').value.trim(), qty: r.querySelector('.mo-q').value, price: r.querySelector('.mo-p').value }));
+    const total = () => { const t = read().reduce((a, x) => a + (Number(x.qty) || 0) * (Number(x.price) || 0), 0); s.querySelector('#moTot').textContent = KSH(t); };
+    box.addEventListener('input', total); total();
+    box.addEventListener('click', e => { const x = e.target.closest('.mo-x'); if (!x) return; if (box.children.length > 1) x.closest('.mo-line').remove(); total(); });
+    s.querySelector('#moAdd').onclick = () => { box.insertAdjacentHTML('beforeend', lineRow({ desc:'', qty:1, price:'' }, box.children.length)); box.lastElementChild.querySelector('.mo-d').focus(); };
+    setTimeout(() => { const p = box.querySelector('.mo-p'); if (p && !p.value) p.focus(); }, 60);
+    s.querySelector('#moSave').onclick = async () => {
+      const btn = s.querySelector('#moSave'), err = s.querySelector('#moErr'); err.textContent = '';
+      const items = read().filter(x => x.desc || x.price);
+      if (!items.length) return err.textContent = 'Add at least one line with a price.';
+      btn.disabled = true;
+      const { data, error } = await db.rpc('kt_save_invoice', { p_order: o.id, p: { items, phone: s.querySelector('#moPh').value, due_date: s.querySelector('#moDue').value } });
+      if (error){ btn.disabled = false; err.textContent = errMsg(error); return; }
+      await load();
+      readyModal('invoice', o, data);
+    };
+  }
+
+  // the client paid: the owner types what she received → receipt
+  function payModal(o, refPrefill){
+    const inv = invOf(o); if (!inv) return invoiceModal(o);
+    const bal = Number(inv.total) - paidOf(inv), half = Math.round(Number(inv.total) / 2);
+    const s = openModal(`<h3>＋ Record payment · ${o.ref}</h3>
+      <p class="sub">${esc(o.customer)} · Invoice ${esc(inv.no)} · Balance <b>${KSH(bal)}</b></p>
+      <label class="field"><span>Amount received (KSh)</span><input id="mpAmt" type="number" min="1" step="1" inputmode="decimal" max="${bal}"></label>
+      <div class="mo-quick">${!paysOf(inv).length && half < bal ? `<button type="button" class="btn sm line" data-amt="${half}">Half · ${KSH(half)}</button>` : ''}<button type="button" class="btn sm line" data-amt="${bal}">All the balance · ${KSH(bal)}</button></div>
+      <div class="row2"><label class="field"><span>Paid by</span><select id="mpM"><option>M-Pesa</option><option>Cash</option><option>Bank</option><option>Other</option></select></label>
+        <label class="field"><span id="mpRefL">M-Pesa code</span><input id="mpRef" value="${esc(refPrefill || '')}" placeholder="e.g. SJK7XQ2M4P" autocapitalize="characters" style="text-transform:uppercase;letter-spacing:.06em"></label></div>
+      <label class="mo-check"><input type="checkbox" id="mpOk"> <span>I have checked this money arrived (in M-Pesa / the bank / in my hand)</span></label>
+      <p id="mpErr" style="color:var(--red);min-height:18px;font-size:13px"></p>
+      <div class="actions"><button class="btn line" data-x>Cancel</button><button class="btn" id="mpSave">Confirm & make receipt</button></div>`);
+    const amt = s.querySelector('#mpAmt'), m = s.querySelector('#mpM');
+    s.querySelectorAll('[data-amt]').forEach(b => b.onclick = () => { amt.value = b.dataset.amt; });
+    m.onchange = () => { s.querySelector('#mpRefL').textContent = m.value === 'Cash' ? 'Note (optional)' : m.value === 'Bank' ? 'Bank reference' : m.value === 'M-Pesa' ? 'M-Pesa code' : 'Reference'; };
+    setTimeout(() => amt.focus(), 60);
+    s.querySelector('#mpSave').onclick = async () => {
+      const btn = s.querySelector('#mpSave'), err = s.querySelector('#mpErr'); err.textContent = '';
+      const a = Number(amt.value);
+      if (!a || a <= 0) return err.textContent = 'Type the amount you received.';
+      if (a > bal + 0.001) return err.textContent = `That's more than the balance (${KSH(bal)}).`;
+      if (!s.querySelector('#mpOk').checked) return err.textContent = 'Tick the box once you have checked the money arrived.';
+      btn.disabled = true;
+      const { data, error } = await db.rpc('kt_record_payment', { p_invoice: inv.id, p_amount: a, p_method: m.value, p_reference: s.querySelector('#mpRef').value });
+      if (error){ btn.disabled = false; err.textContent = errMsg(error); return; }
+      await load();
+      readyModal('receipt', o, data.payment, data);
+    };
+  }
+
+  // straight after saving: one big button sends the PDF (a tap is needed for the phone's Share)
+  function readyModal(kind, o, doc, extra){
+    const isR = kind === 'receipt';
+    const s = openModal(`<div class="mo-ready"><span class="mo-tick">✓</span>
+      <h3>${isR ? 'Payment recorded' : 'Invoice ready'}</h3>
+      <p class="sub">${isR ? `Receipt <b>${esc(doc.no)}</b> · ${KSH(doc.amount)}${extra && extra.balance > 0 ? ` · balance ${KSH(extra.balance)}` : ' · fully paid ✓'}` : `<b>${esc(doc.no)}</b> · total ${KSH(doc.total)}`}</p>
+      ${isR && extra && extra.first ? '<p class="mo-note">✓ The workshop can start this order now.</p>' : ''}
+      <button class="btn mo-big" id="mrSend">📤 Send ${isR ? 'receipt' : 'invoice'} to ${esc(firstName(o.customer))}</button>
+      <p class="sub" style="font-size:12.5px">On the phone: pick WhatsApp, then ${esc(firstName(o.customer))}. The PDF goes with it.</p>
+      <button class="btn line" id="mrView">👁 Just look at the PDF</button>
+      <div class="actions"><button class="btn line" data-x>Done</button></div></div>`);
+    let blob = null;
+    const make = async () => blob || (blob = isR ? await receiptBlob(doc.id) : await invoiceBlob(doc.id));
+    make().catch(() => {});   // start making it now so the Send tap is instant
+    s.querySelector('#mrSend').onclick = async () => {
+      const b = s.querySelector('#mrSend'); b.disabled = true;
+      try { const r = await (isR ? sendReceipt(doc.id, await make()) : sendInvoice(doc.id, await make())); if (r !== 'cancel'){ closeModal(); await load(); } }
+      catch(e){ toast(errMsg(e)); }
+      b.disabled = false;
+    };
+    s.querySelector('#mrView').onclick = async () => { try { const u = URL.createObjectURL(await make()); window.open(u, '_blank'); } catch(e){ toast(errMsg(e)); } };
+  }
+
+  async function invoiceBlob(id){
+    const inv = S.money.inv.find(i => i.id === id); if (!inv) throw new Error('Invoice not found');
+    return KPDF.invoice({ biz: S.money.biz, inv, paid: paidOf(inv) });
+  }
+  async function receiptBlob(id){
+    const p = S.money.pays.find(x => x.id === id); if (!p) throw new Error('Receipt not found');
+    const inv = S.money.inv.find(i => i.id === p.invoice_id);
+    const upTo = paysOf(inv).filter(x => new Date(x.created_at) <= new Date(p.created_at)).reduce((a, x) => a + Number(x.amount), 0);
+    return KPDF.receipt({ biz: S.money.biz, inv, pay: p, paidSoFar: upTo, balance: Number(inv.total) - upTo });
+  }
+  async function sendInvoice(id, blob){
+    const inv = S.money.inv.find(i => i.id === id), o = inv && O(inv.order_id);
+    blob = blob || await invoiceBlob(id);
+    const pay = S.money.biz.pay_phone ? ` by M-Pesa to ${String(S.money.biz.pay_phone).replace(/^254/, '0')}${S.money.biz.pay_name ? ' (' + S.money.biz.pay_name + ')' : ''}` : '';
+    const msg = `Hi ${firstName(inv.customer)}, here is your Kartech invoice ${inv.no} for ${inv.order_ref || 'your order'}. To start, please pay the deposit${pay}.${o && o.room ? `\nThen tap "I've paid" here: ${roomLink(o)}` : ''}\nThank you! Kartech Engineering`;
+    const r = await KPDF.send(blob, `Kartech-${inv.no}.pdf`, msg, inv.phone || (o && phoneOf(o)));
+    if (r !== 'cancel'){ await db.rpc('kt_invoice_sent', { p_invoice: id }); toast(r === 'shared' ? 'Invoice sent ✓' : 'Invoice PDF saved. Attach it in WhatsApp.'); }
+    return r;
+  }
+  async function sendReceipt(id, blob){
+    const p = S.money.pays.find(x => x.id === id), inv = S.money.inv.find(i => i.id === p.invoice_id), o = inv && O(inv.order_id);
+    blob = blob || await receiptBlob(id);
+    const msg = `Hi ${firstName(inv.customer)}, thank you! Here is your Kartech receipt ${p.no} for ${KSH(p.amount)} (${inv.order_ref || inv.no}).`;
+    const r = await KPDF.send(blob, `Kartech-${p.no}.pdf`, msg, inv.phone || (o && phoneOf(o)));
+    if (r !== 'cancel'){ await db.rpc('kt_receipt_sent', { p_payment: id }); toast(r === 'shared' ? 'Receipt sent ✓' : 'Receipt PDF saved. Attach it in WhatsApp.'); }
+    return r;
+  }
+
+  // the Finance tab: money in, money owed, every invoice
+  function viewFinance(){
+    if (!S.money) return `<div class="kf-wrap"><div class="kf-head"><div><span class="kf-eyebrow">OWNER ONLY</span><h1>Finance</h1></div></div><div class="kf-notice"><b>One-time setup</b><p>Run <b>update-23-invoices-receipts.sql</b> in Supabase to turn on invoices and PDF receipts.</p></div></div>`;
+    const now = new Date(), month = p => { const d = new Date(p.created_at); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); };
+    const inMonth = S.money.pays.filter(month).reduce((a, p) => a + Number(p.amount), 0);
+    const today = S.money.pays.filter(p => new Date(p.created_at).toDateString() === now.toDateString()).reduce((a, p) => a + Number(p.amount), 0);
+    const rows = S.money.inv.map(i => ({ i, paid: paidOf(i), bal: Number(i.total) - paidOf(i), o: O(i.order_id) }));
+    const owed = rows.reduce((a, r) => a + Math.max(0, r.bal), 0);
+    const open = rows.filter(r => r.bal > 0), done = rows.filter(r => r.bal <= 0);
+    const row = r => `<button class="kf-row" ${r.o ? `data-open="${r.o.id}"` : ''}><span><b>${esc(r.i.order_ref || '—')} · ${esc(firstName(r.i.customer))}</b><small>${esc(r.i.no)} · ${KSH(r.i.total)}${r.i.sent_at ? '' : ' · not sent yet'}</small></span><span class="kf-status ${r.bal > 0 ? '' : 'ok'}">${r.bal > 0 ? KSH(r.bal) + ' due' : 'Paid ✓'}</span><span>→</span></button>`;
+    const recent = S.money.pays.slice(-8).reverse();
+    return `<div class="kf-wrap"><div class="kf-head"><div><span class="kf-eyebrow">OWNER ONLY · THE MANAGER NEVER SEES THIS</span><h1>Finance</h1><p>Money received, money owed, invoices and receipts.</p></div></div>
+      <div class="kf-grid"><div class="kf-stat good"><small>Received today</small><strong class="kf-money">${KSH(today)}</strong></div>
+        <div class="kf-stat good"><small>Received this month</small><strong class="kf-money">${KSH(inMonth)}</strong></div>
+        <div class="kf-stat warn"><small>Still owed</small><strong class="kf-money">${KSH(owed)}</strong><span>${open.length} invoice${open.length === 1 ? '' : 's'}</span></div>
+        <div class="kf-stat"><small>Receipts made</small><strong>${S.money.pays.length}</strong></div></div>
+      <section class="kf-panel"><div class="kf-title"><h2>Waiting for money</h2><span>${open.length}</span></div>${open.map(row).join('') || '<p class="kf-empty">Nobody owes anything. ✓</p>'}</section>
+      <section class="kf-panel"><div class="kf-title"><h2>Latest receipts</h2></div>${recent.map(p => { const i = S.money.inv.find(x => x.id === p.invoice_id); return `<div class="kf-row kf-rc"><span><b>${esc(p.no)} · ${KSH(p.amount)}</b><small>${esc(i ? (i.order_ref || '') + ' · ' + firstName(i.customer) : '')} · ${esc(p.method)}${p.reference ? ' ' + esc(p.reference) : ''} · ${dShort(p.created_at)}</small></span><button class="btn sm ${p.sent_at ? 'line' : ''}" data-msendr="${p.id}">📤 ${p.sent_at ? 'Again' : 'Send'}</button></div>`; }).join('') || '<p class="kf-empty">No receipts yet. Open an order → Invoice & payments → Record payment.</p>'}</section>
+      ${done.length ? `<section class="kf-panel"><div class="kf-title"><h2>Fully paid</h2><span>${done.length}</span></div>${done.slice(0, 20).map(row).join('')}</section>` : ''}
+      <p class="kf-footnote">To make an invoice: open the order → 💳 Invoice & payments → Make invoice. Receipts are made when you record a payment you have checked.</p></div>`;
+  }
+
+  // buttons
+  document.addEventListener('click', async e => {
+    const mi = e.target.closest('[data-minv]'); if (mi){ const o = O(mi.dataset.minv); if (o) invoiceModal(o); return; }
+    const mp = e.target.closest('[data-mpay]'); if (mp){ const o = O(mp.dataset.mpay); if (o) payModal(o, mp.dataset.mref || ''); return; }
+    const si = e.target.closest('[data-msendinv]'); if (si && !si.disabled){ si.disabled = true; try { await sendInvoice(si.dataset.msendinv); await load(); } catch(er){ toast(errMsg(er)); } si.disabled = false; return; }
+    const sr = e.target.closest('[data-msendr]'); if (sr && !sr.disabled){ sr.disabled = true; try { await sendReceipt(sr.dataset.msendr); await load(); } catch(er){ toast(errMsg(er)); } sr.disabled = false; return; }
+    const mc = e.target.closest('[data-mcancel]'); if (mc){
+      if (!mc.classList.contains('sure')){ mc.classList.add('sure'); mc.textContent = 'Sure? Tap again'; setTimeout(() => { if (document.body.contains(mc)){ mc.classList.remove('sure'); mc.textContent = 'Cancel'; } }, 4000); return; }
+      const p = S.money.pays.find(x => x.id === mc.dataset.mcancel), inv = p && S.money.inv.find(i => i.id === p.invoice_id);
+      const { error } = await db.rpc('kt_cancel_payment', { p_payment: mc.dataset.mcancel });
+      if (error) return toast(errMsg(error));
+      toast('Receipt cancelled'); await load(); if (inv && O(inv.order_id)) orderModal(inv.order_id); return; }
+  });
   async function payAct(fn, args, msg, orderId){ const ok = await act(fn, args, msg); if (ok && O(orderId)) orderModal(orderId); }
 
   function orderModal(id){

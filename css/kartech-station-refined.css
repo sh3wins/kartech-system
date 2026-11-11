@@ -1,0 +1,30 @@
+/* Kartech OS workshop — shared visual language, no workflow changes. */
+:root{--deep:#24533f;--deep2:#193e31;--deep3:#356c55;--lime:#dce9df;--lime2:#c9dccd;--lime-soft:#eff5f0;--bg:#f7f8f6;--card:#fff;--ink:#202b27;--muted:#78847e;--line:#e8ece8;--forest:var(--deep);--forest2:var(--deep2);--leaf:var(--deep);--leaf-soft:var(--lime-soft);--paper:var(--bg);--r-lg:14px;--r-md:12px;--r-sm:9px;--shadow:0 2px 12px rgba(22,49,34,.035);--shadow-up:0 8px 25px rgba(22,49,34,.075);--head:'DM Sans',sans-serif;--body:'DM Sans',sans-serif}
+body.sw{background:var(--bg);color:var(--ink)}
+.sw-shell{grid-template-columns:minmax(230px,25%) 1fr}
+.sw-side{background:var(--card);color:var(--ink);border-right:1px solid var(--line);padding:28px 25px}
+.sw-side .logo{color:var(--ink)}.sw-side .logo svg{color:var(--deep)}
+.sw-clock b{font-size:clamp(50px,6vw,76px);font-weight:650;letter-spacing:-.06em}.sw-clock span{color:var(--muted);font-size:15px}
+.sw-hello{color:var(--ink)}.sw-foot{color:var(--muted)}.sw-switch{color:var(--deep)}
+.sw-side .blob{display:none!important}
+.sw-main{padding:clamp(22px,3vw,42px)}
+.sw-main h1{font-family:var(--head)!important;font-weight:650;letter-spacing:-.04em;font-size:clamp(27px,3vw,37px)}
+.sw-main .lead{font-size:15px;color:var(--muted)}
+.sw-card,.name,.tc,.tc-banner,.cur,.nxt{border:1px solid var(--line)!important;border-radius:13px!important;background:var(--card);box-shadow:var(--shadow)!important}
+.name{font-family:var(--body)!important;font-size:17px;font-weight:650;transition:transform .18s ease,box-shadow .18s ease!important}
+.name:hover{transform:translateY(-2px)!important;box-shadow:var(--shadow-up)!important}
+.name .av{border-radius:10px!important;background:var(--lime-soft)!important;color:var(--deep)!important}
+.st-group h4{letter-spacing:.08em;font-size:12px}
+.giant,.btn,.fm-btn{border-radius:10px!important;font-family:var(--body)!important}
+.giant.go{background:var(--deep)!important;color:#fff!important;animation:none!important}
+.giant.done{border:2px solid var(--deep)!important;color:var(--deep)!important}
+.giant.done.sure{background:var(--deep)!important;color:#fff!important}
+.tag{border-radius:7px!important}.sw .pad button{border-radius:10px!important}
+.sw-snd{border:1px solid var(--line);border-radius:9px;color:var(--ink);background:var(--bg)}
+.sw-theme-toggle{border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink);padding:9px 12px;cursor:pointer;text-align:left;font:600 13px var(--body);margin-top:12px}
+html[data-theme="dark"]{color-scheme:dark;--deep:#93bfa6;--deep2:#c3decf;--deep3:#a6d2b9;--lime:#2c493b;--lime2:#365646;--lime-soft:#263a31;--bg:#131b18;--card:#1c2621;--ink:#eef3ef;--muted:#a2b2a9;--line:#34443a;--shadow:0 2px 14px rgba(0,0,0,.16);--shadow-up:0 10px 26px rgba(0,0,0,.24)}
+html[data-theme="dark"] .sw-side,html[data-theme="dark"] .sw-card,html[data-theme="dark"] .name,html[data-theme="dark"] .tc,html[data-theme="dark"] .cur,html[data-theme="dark"] .nxt{background:var(--card)!important;color:var(--ink)!important;border-color:var(--line)!important}
+html[data-theme="dark"] input,html[data-theme="dark"] select,html[data-theme="dark"] textarea{background:var(--bg);color:var(--ink);border-color:var(--line)}
+:where(button,a,input,select,textarea):focus-visible{outline:3px solid #6eaa88;outline-offset:3px}
+@media(max-width:750px){.sw-shell{grid-template-columns:1fr}.sw-side{border-right:0;border-bottom:1px solid var(--line);height:auto;position:relative}.sw-clock b{font-size:45px}.sw-main{padding:20px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
