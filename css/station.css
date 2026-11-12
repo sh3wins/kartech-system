@@ -299,3 +299,14 @@ textarea.fm-in{resize:vertical;font-weight:600}
 .sw-owner:hover{background:#9A7741}
 .sw-owner.hidden{display:none}
 @media (max-width:860px){ .sw-owner{right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));font-size:14px;padding:12px 18px} }
+.fm-job{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;background:#fff;border:2px solid #1F6B53;border-radius:20px;padding:16px 18px;margin:0 0 16px}
+.fm-job-t{display:flex;flex-direction:column;gap:3px;min-width:0}
+.fm-job-t .k{margin:0;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#6B7A72}
+.fm-job-t b{font-size:20px;color:#14261F}
+.fm-job-t span{font-size:14px;color:#4A5751}
+.fm-job-t em{font-style:normal;font-weight:700;color:#1F7A4D}.fm-job-t em.nw{color:#9A6A12}
+.fm-donebtn{border:0;border-radius:16px;background:#1F6B53;color:#fff;font:inherit;font-size:17px;font-weight:800;padding:16px 24px;cursor:pointer;min-height:56px}
+.fm-donebtn:hover{background:#185844}
+.fm-donebtn.sure{background:#B08A4F;animation:fmPulse 1s ease-in-out infinite}
+@keyframes fmPulse{50%{box-shadow:0 0 0 6px rgba(176,138,79,.25)}}
+@media (max-width:860px){.fm-donebtn{width:100%}}

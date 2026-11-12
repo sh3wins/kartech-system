@@ -147,6 +147,8 @@
         return `<button class="tc ${has ? 'out' : other ? 'other' : ''}" data-ft="${t.id}"><span class="tc-ic">${has ? '✓' : other ? '•' : '+'}</span><span><b>${esc(t.name)}</b><small>${has ? 'Taken · ' + fmTime(t.since) : other ? 'With ' + esc(t.with_name || 'someone') : 'Tap if he takes it'}</small></span></button>`; };
       v.innerHTML = head(esc(w.name), `${stageName(w.stage)}${w.job ? ` · on <b>${esc(w.job.ref)}</b>, ${w.job.qty} × ${esc(w.job.item)}` : ''}`, true) + `
         <div class="in-strip anim"><button class="link-sm fm-edw" id="fmEditW">✏️ Change ${esc(w.name)}'s job</button>${w.in ? `<span class="in-ok">✓ In today${w.arrived_at ? ' since ' + fmTime(w.arrived_at) : ''}</span><button class="link-sm" id="fmUnarrive">Ticked by mistake? Undo</button>` : `<span>Not in yet</span><button class="btn" id="fmArrive">Tick ${esc(w.name)} in</button>`}</div>
+        ${w.job ? `<div class="fm-job anim" style="--i:1"><div class="fm-job-t"><p class="k">${esc(w.name)}'s job now</p><b>${esc(w.job.ref)} · ${esc(stageName(w.stage))}</b><span>${w.job.qty} × ${esc(w.job.item)}${w.job.status === 'working' ? ' · <em>working on it</em>' : ' · <em class="nw">not started yet</em>'}</span></div>
+          <button class="fm-donebtn ${fm.sure === w.id ? 'sure' : ''}" id="fmJobDone">${fm.sure === w.id ? 'Tap again to confirm ✓' : '✓ Mark job done'}</button></div>` : ''}
         <div class="st-group anim" style="--i:1"><h4>${esc(stageName(w.stage))} tools · tick what ${esc(w.name)} takes</h4>
           <div class="tc-grid">${mine.map(tile).join('') || `<p class="muted">No tools set for ${esc(stageName(w.stage))} yet. The owner sets this in the app (Stock → edit a tool → "Used by").</p>`}</div>
           ${others.length ? (fm.showAll ? `<h4 style="margin-top:16px">Other tools</h4><div class="tc-grid">${others.map(tile).join('')}</div>` : `<button class="link-sm" id="fmAllTools" style="margin-top:12px">+ Show other tools (${others.length})</button>`) : ''}</div>
@@ -337,6 +339,15 @@
       const t = fm.data.tools.find(x => x.id === b.dataset.ft);
       toast(data === 'back' ? `${t ? t.name : 'Tool'} returned ✓` : `${t ? t.name : 'Tool'} → ${fmW(fm.wid).name}`);
       await fmLoad(); return renderForeman();
+    }
+    if (b.id === 'fmJobDone'){
+      const w = fmW(fm.wid);
+      if (fm.sure !== w.id){ fm.sure = w.id; renderForeman(); clearTimeout(fm.sureT); fm.sureT = setTimeout(() => { if (fm.sure){ fm.sure = null; if (fm.view === 'worker') renderForeman(); } }, 5000); return; }
+      fm.sure = null; b.disabled = true; b.textContent = 'Saving…';
+      const { data, error } = await db.rpc('ws_foreman_done', { p_pin: fm.pin, p_worker: w.id });
+      if (error){ toast(/ws_foreman_done/.test(errMsg(error)) ? 'Ask the owner to run update-24 in Supabase first.' : errMsg(error)); b.disabled = false; renderForeman(); return; }
+      toast(`${w.name}'s job is done ✓ The next step has moved on.`);
+      await fmLoad(); renderForeman(); return;
     }
     if (b.dataset.fmat){ fm.pick = b.dataset.fmat; fm.qty = ''; return renderForeman(); }
     if (b.dataset.again){
