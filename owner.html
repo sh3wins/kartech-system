@@ -14,7 +14,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600;700;800&family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/app.css?v=5">
-<link rel="stylesheet" href="css/dash.css?v=26">
+<link rel="stylesheet" href="css/dash.css?v=27">
 <link rel="stylesheet" href="css/theme-owner.css?v=1">
 <link rel="stylesheet" href="css/kartech-charts.css?v=1">
 <link rel="stylesheet" href="css/kartech-motion.css?v=1">
@@ -35,6 +35,7 @@
     <button data-tab="history"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2"/></svg><span>History</span></button>
   </nav>
   <div class="side-foot">
+    <a class="side-sw" href="station.html" title="See the screen the workers use"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21V9l6 4V9l6 4V5h6v16z"/></svg><span>Workshop screen<small>What the workers see</small></span><b aria-hidden="true">→</b></a>
     <button class="side-set" id="sideSet"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg><span>Voice &amp; settings</span></button>
     <div class="me"><span class="me-av">O</span><span><b>Owner</b><small id="who"></small></span></div>
   </div>
@@ -44,6 +45,7 @@
 <header class="mbar hidden" id="mbar">
   <div class="logo"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M6 4h8v13L26 4h10L22 19l15 17H26L14 22v14H6z" fill="currentColor"/></svg><span>Kartech</span></div>
   <span class="live hidden" id="live"><i></i> Live</span>
+  <a class="msw" href="station.html" aria-label="Open the workshop screen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21V9l6 4V9l6 4V5h6v16z"/></svg><span>Workshop</span></a>
   <button class="mset" id="mSet" aria-label="Voice and settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg></button>
 </header>
 

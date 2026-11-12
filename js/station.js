@@ -19,6 +19,8 @@
     if (error || !ok){
       const { data: owner } = await db.rpc('is_admin');
       if (!owner){ await db.auth.signOut(); $('#setView').classList.remove('hidden'); $('#sErr').textContent = "That account isn't the workshop account."; return; }
+      // the owner opened this screen from her app: give her a one-tap way back (never shown on the workshop computer)
+      const to = $('#toOwner'); if (to) to.classList.remove('hidden');
     }
     $('#setView').classList.add('hidden'); $('#live').classList.remove('hidden'); const sb = $('#sndBtn'); if (sb) sb.classList.remove('hidden'); soundBtn();
     await loadSteps();
