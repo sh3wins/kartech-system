@@ -6,13 +6,18 @@
    ===================================================================== */
 window.KPDF = (() => {
   let lib = null;
+  // tries our own copy first (always works with the website), then two public copies
+  const SRC = ['js/vendor/jspdf-2.5.2.umd.min.js', 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js', 'https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js'];
   const load = () => lib || (lib = new Promise((ok, no) => {
     if (window.jspdf) return ok(window.jspdf);
-    const sc = document.createElement('script');
-    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js';
-    sc.onload = () => ok(window.jspdf);
-    sc.onerror = () => { lib = null; no(new Error('Could not load the PDF maker. Check the internet.')); };
-    document.head.appendChild(sc);
+    const next = i => {
+      if (i >= SRC.length){ lib = null; return no(new Error('Could not load the PDF maker. Check the internet and try again.')); }
+      const sc = document.createElement('script'); sc.src = SRC[i];
+      sc.onload = () => window.jspdf ? ok(window.jspdf) : next(i + 1);
+      sc.onerror = () => { sc.remove(); next(i + 1); };
+      document.head.appendChild(sc);
+    };
+    next(0);
   }));
 
   const C = { forest:[24,88,68], ink:[16,47,39], gold:[176,138,79], muted:[95,111,100], line:[227,217,198], soft:[246,241,230], green:[46,125,79], white:[255,255,255] };

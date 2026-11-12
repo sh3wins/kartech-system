@@ -7,13 +7,18 @@
    ===================================================================== */
 window.KQR = (() => {
   let lib = null;
+  // tries our own copy first (always works with the website), then two public copies
+  const SRC = ['js/vendor/qrcode-1.4.4.js', 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js', 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js'];
   const load = () => lib || (lib = new Promise((ok, no) => {
     if (window.qrcode) return ok(window.qrcode);
-    const sc = document.createElement('script');
-    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
-    sc.onload = () => ok(window.qrcode);
-    sc.onerror = () => { lib = null; no(new Error('Could not load the QR maker. Check the internet.')); };
-    document.head.appendChild(sc);
+    const next = i => {
+      if (i >= SRC.length){ lib = null; return no(new Error('Could not load the QR maker. Check the internet and try again.')); }
+      const sc = document.createElement('script'); sc.src = SRC[i];
+      sc.onload = () => window.qrcode ? ok(window.qrcode) : next(i + 1);
+      sc.onerror = () => { sc.remove(); next(i + 1); };
+      document.head.appendChild(sc);
+    };
+    next(0);
   }));
 
   async function make(link){ const q = (await load())(0, 'M'); q.addData(link); q.make(); return q; }
