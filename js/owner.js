@@ -109,6 +109,10 @@
       const [fi, fp, fb] = await Promise.all([db.from('kt_invoices').select('*').order('created_at', { ascending:false }).limit(1000),
         db.from('kt_payments').select('*').order('created_at', { ascending:true }).limit(3000), db.rpc('kt_business')]);
       S.money = fi.error || fp.error ? null : { inv: fi.data, pays: fp.data, biz: fb.error ? {} : (fb.data || {}) };
+      // sales demand: every order from the last 6 months, delivered or not (light: just item and size)
+      const d6 = new Date(); d6.setDate(1); d6.setMonth(d6.getMonth() - 5); d6.setHours(0, 0, 0, 0);
+      const hs = await db.from('ws_orders').select('id,item,qty,created_at').gte('created_at', d6.toISOString()).order('created_at', { ascending:false }).limit(2000);
+      S.hist = hs.error ? null : hs.data.map(x => ({ id:x.id, item:x.item, qty:x.qty, createdAt:new Date(x.created_at).getTime() }));
       loaded = true;
       loadDay();
       announceChanges();
@@ -190,6 +194,7 @@
   }
   /* ---------- DASHBOARD ---------- */
   let enter = true, prevStats = {}, seenAtt = null, orderFilter = null;
+  let demandBy = 'pcs'; try { demandBy = localStorage.getItem('kt-demand') || 'pcs'; } catch (e) {}
   let orderSrc = 'all'; try { orderSrc = localStorage.getItem('kt-osrc') || 'all'; } catch (e) {}
   const srcOf = o => (o.srcNo || o.reqId) ? 'online' : 'shop';
   const orderHealth = o => { const p = orderProgress(o);
@@ -221,79 +226,157 @@
     const active = open.slice().sort((a,b) => URG[a.urgency] - URG[b.urgency] || a.deadline - b.deadline).slice(0, 6);
     const ready = S.orders.filter(o => !o.delivered && orderProgress(o).finished);
     const web = waitingWeb();
+    // steps finished per day, last 14 days (for the big chart)
+    const dayKey = t => new Date(t).toLocaleDateString('en-CA', { timeZone:'Africa/Nairobi' });
+    const days = [...Array(14)].map((_, i) => { const d = new Date(Date.now() - (13 - i) * 864e5); return { k: dayKey(d), lbl: d.toLocaleDateString('en-GB', { weekday:'short' }).slice(0, 2), n: d.getDate() }; });
+    const doneBy = {}; S.tasks.forEach(t => { if (t.status === 'done' && t.doneAt){ const k = dayKey(t.doneAt); doneBy[k] = (doneBy[k] || 0) + 1; } });
+    const series = days.map(d => doneBy[d.k] || 0), peak = Math.max(4, ...series);
+    const wk = series.slice(7).reduce((a, x) => a + x, 0), lastWk = series.slice(0, 7).reduce((a, x) => a + x, 0);
+    const trend = lastWk ? Math.round((wk - lastWk) / lastWk * 100) : null;
+    const b = briefing();
+    const live = S.orders.filter(o => !o.delivered);
+    const health = [['On track', 'track'], ['At risk', 'risk'], ['Late', 'late'], ['Ready', 'ready']].map(([l, k]) => [l, live.filter(o => orderHealth(o)[0] === k).length, k]);
+    const openIds = new Set(live.map(o => o.id)), tks = S.tasks.filter(t => openIds.has(t.order));
+    const tDone = tks.filter(t => t.status === 'done').length, tWork = tks.filter(t => t.status === 'working' || t.status === 'assigned').length, tWait = Math.max(0, tks.length - tDone - tWork);
+    const pct = tks.length ? Math.round(tDone / tks.length * 100) : 0;
     const html = `
-      <div class="d-head anim" style="--i:0">
-        <div><p class="d-date">${now.toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short', year:'numeric' })}</p>
-        <h1>${briefing().hello} <span class="wave">👋</span></h1>
-        <p class="sub" style="margin:0">${att.length ? `Here's what needs your attention today.` : 'Everything is running on its own. ✓'}</p></div>
-        <button class="btn d-new" data-neworder><span>+</span> New order</button>
+      <div class="kd-top anim" style="--i:0">
+        <div><h1>${b.hello}</h1><p>${att.length ? `Here's what's happening in the workshop today.` : 'Everything is running on its own. ✓'}</p></div>
+        <div class="kd-tools">
+          <span class="kd-date"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>${now.toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short', year:'numeric' })}</span>
+          <button class="btn d-new" data-neworder><span>+</span> New order</button>
+        </div>
       </div>
-      ${briefCard()}
-      <div class="kpis">
+      <div class="kpis kd-kpis">
         ${box('late', 'Late', 'past the deadline', 'orders:late', '!')}
         ${box('urgent', 'Urgent', 'jobs to rush', 'orders:urgent', '⚡')}
         ${box('waiting', 'In line', 'waiting for a worker', 'workshop', '◷')}
         ${box('working', 'In progress', 'being worked on', 'workshop', '▶')}
       </div>
-      <section class="kt-charts anim" style="--i:4" aria-label="Workshop performance charts">
-        <div class="kt-chart-panel">
-          <div class="kt-chart-head"><div><span class="kt-chart-kicker">WORKSHOP INSIGHTS</span><h3>Order health</h3><p>Current orders by progress</p></div><span class="kt-chart-tag">Live overview</span></div>
-          ${(() => {
-            const live = S.orders.filter(o => !o.delivered);
-            const groups = [
-              ['On track', live.filter(o => orderHealth(o)[0] === 'track').length, 'track'],
-              ['At risk', live.filter(o => orderHealth(o)[0] === 'risk').length, 'risk'],
-              ['Late', live.filter(o => orderHealth(o)[0] === 'late').length, 'late'],
-              ['Ready', live.filter(o => orderHealth(o)[0] === 'ready').length, 'ready']
-            ];
-            const total = live.length;
-            return `<div class="kt-chart-total"><strong>${total}</strong><span>undelivered orders</span></div><div class="kt-bars">${groups.map(([label, count, type]) => `<div class="kt-bar-row"><span>${label}</span><div class="kt-bar-track" role="img" aria-label="${label}: ${count} orders"><i class="kt-bar-fill kt-bar-${type}" style="--bar-width:${total ? Math.round(count / total * 100) : 0}%"></i></div><b>${count}</b></div>`).join('')}</div>`;
-          })()}
-        </div>
-        <div class="kt-chart-panel">
-          <div class="kt-chart-head"><div><span class="kt-chart-kicker">TASK PROGRESS</span><h3>Workshop completion</h3><p>Steps of the orders still open</p></div></div>
-          ${(() => {
-            const openIds = new Set(S.orders.filter(o => !o.delivered).map(o => o.id));
-            const tasks = S.tasks.filter(t => openIds.has(t.order));
-            const done = tasks.filter(t => t.status === 'done').length;
-            const working = tasks.filter(t => t.status === 'working' || t.status === 'assigned').length;
-            const queued = Math.max(0, tasks.length - done - working);
-            const total = tasks.length;
-            const pct = total ? Math.round(done / total * 100) : 0;
-            return `<div class="kt-progress-layout"><div class="kt-donut" role="img" aria-label="${pct}% of ${total} tasks completed" style="--pct:${pct}"><div class="kt-donut-inner"><strong>${pct}%</strong><span>complete</span></div></div><div class="kt-legend"><div><i class="kt-dot kt-done"></i><span>Completed</span><b>${done}</b></div><div><i class="kt-dot kt-working"></i><span>In progress</span><b>${working}</b></div><div><i class="kt-dot kt-queued"></i><span>Waiting</span><b>${queued}</b></div></div></div>`;
-          })()}
-        </div>
-      </section>
-      <div class="d-grid">
-        <div class="d-col">
-          ${att.length ? `<div class="panel anim" style="--i:4"><div class="p-head"><h3>Needs you <span class="count">${att.length}</span></h3></div>
-            ${att.map(a => `<div class="need ${a.lvl} ${fresh.includes(a.title) ? 'fresh' : ''}"><span class="need-dot"></span><div class="grow"><b>${esc(a.title)}</b><p>${esc(a.sub)}</p></div>${a.act}</div>`).join('')}</div>` : ''}
-          <div class="panel anim" style="--i:5"><div class="p-head"><h3>Active orders</h3><button class="link" data-tabgo="orders">View all</button></div>
-            ${active.length ? active.map((o, i) => { const p = orderProgress(o), pct = Math.round(100 * p.done / Math.max(1, p.total)), [hk, hl] = orderHealth(o);
-              return `<button class="ord" data-open="${o.id}">
-                <div class="ord-name"><b>${esc(o.item)}</b> <span class="muted">(${o.ref})</span><small>${o.qty} pcs · ${esc(o.customer)}${p.current ? ' · now at ' + stageName(p.current.stage) : ''}</small></div>
-                <div class="ord-bar"><i class="h-${hk}" style="width:${Math.max(pct, 4)}%;--d:${i * 80}ms"></i></div><span class="ord-pct">${pct}%</span>
-                <span class="ord-due">Due ${fmtDay(o.deadline)}</span><span class="hp h-${hk}">${hl}</span></button>`; }).join('')
-              : `<p class="empty">No open orders. Tap <b>+ New order</b> to add one.</p>`}
+      <div class="kd-row kd-r1">
+        <section class="kd-card kd-chart anim" style="--i:4">
+          <div class="kd-head"><div><span class="kd-kicker">WORKSHOP OUTPUT</span><h3>Steps finished</h3>
+            <p class="kd-big"><b>${wk}</b> this week ${trend === null ? '' : `<span class="${trend >= 0 ? 'up' : 'down'}">${trend >= 0 ? '↑' : '↓'} ${Math.abs(trend)}% vs last week</span>`}</p></div>
+            <span class="kd-pill">Last 14 days</span></div>
+          <div class="kd-bars" role="img" aria-label="Steps finished each day for the last 14 days">
+            ${series.map((n, i) => `<div class="kd-bar ${i === 13 ? 'today' : ''}" title="${days[i].n}: ${n} step${n === 1 ? '' : 's'} finished"><i style="height:${Math.max(4, Math.round(n / peak * 100))}%"></i><span>${i === 13 ? 'Today' : days[i].lbl}</span></div>`).join('')}
           </div>
-        </div>
-        <div class="d-col">
-          <div class="panel anim" style="--i:6"><div class="p-head"><h3>Quick actions</h3></div>
-            <button class="qa" data-neworder><i>＋</i><span><b>Create order</b><small>Add a job for the workshop</small></span></button>
-            <button class="qa" data-tabgo="orders"><i>🌐</i><span><b>Website orders</b><small>${web.length ? web.length + ' waiting to be sent to the workshop' : 'None waiting'}</small></span>${web.length ? `<em>${web.length}</em>` : ''}</button>
-            <button class="qa" data-move="out"><i>📦</i><span><b>Give out materials</b><small>Record what leaves the store</small></span></button>
-            <button class="qa" data-tabgo="workers"><i>👥</i><span><b>View workers</b><small>${S.workers.filter(w => w.active).length} on the team</small></span></button>
-            ${ready.length ? `<button class="qa" data-tabgo="orders"><i>🚚</i><span><b>Ready to deliver</b><small>${ready.length} finished and loaded</small></span><em class="g">${ready.length}</em></button>` : ''}
+        </section>
+        <section class="kd-card kd-plan b-${b.part} anim" style="--i:5">
+          <div class="kd-plan-head"><span class="kd-kicker">${b.part === 'evening' ? 'TODAY’S RECAP' : 'TODAY’S PLAN'}</span><button class="btn sm brief-say" data-brief>🔊 Read it to me</button></div>
+          <h3>${esc(b.title)}</h3>
+          <div class="kd-orb" aria-hidden="true"></div>
+          <ul>${b.lines.slice(0, 4).map(([i, t, tone]) => `<li class="${tone}"><span>${i}</span>${esc(t)}</li>`).join('')}</ul>
+        </section>
+      </div>
+      ${demandCard()}
+      <div class="kd-row kd-r2">
+        <section class="kd-card anim" style="--i:6"><div class="kd-head"><h3>Needs you ${att.length ? `<span class="count">${att.length}</span>` : ''}</h3></div>
+          ${att.length ? att.map(a => `<div class="need ${a.lvl} ${fresh.includes(a.title) ? 'fresh' : ''}"><span class="need-dot"></span><div class="grow"><b>${esc(a.title)}</b><p>${esc(a.sub)}</p></div>${a.act}</div>`).join('') : '<p class="empty">Nothing needs you right now. ✓</p>'}
+        </section>
+        <section class="kd-card anim" style="--i:7"><div class="kd-head"><h3>Active orders</h3><button class="link" data-tabgo="orders">View all</button></div>
+          ${active.length ? active.map((o, i) => { const p = orderProgress(o), op = Math.round(100 * p.done / Math.max(1, p.total)), [hk, hl] = orderHealth(o);
+            return `<button class="kd-ord" data-open="${o.id}"><span class="kd-av h-${hk}">${esc(o.item.charAt(0))}</span>
+              <span class="kd-ord-t"><b>${esc(o.item)}</b><small>${o.ref} · ${o.qty} pcs · due ${fmtDay(o.deadline)}</small><i class="kd-prog"><em class="h-${hk}" style="width:${Math.max(op, 4)}%"></em></i></span>
+              <span class="hp h-${hk}">${hl}</span></button>`; }).join('')
+            : `<p class="empty">No open orders. Tap <b>+ New order</b> to add one.</p>`}
+        </section>
+        <section class="kd-card anim" style="--i:8"><div class="kd-head"><h3>Workshop news</h3><span class="live-dot"></span></div>
+          ${S.log.slice(0, 6).map(l => { const m = chatMsg(l); const who = m.me ? 'You' : m.from;
+            return `<div class="news ${l.kind === 'alert' && !m.me ? 'alert' : ''}"${l.order ? ` data-open="${l.order}"` : ''}><span class="news-av" style="background:${m.me ? 'var(--ink)' : m.sys ? 'var(--metal)' : colorOf(m.from)}">${m.sys ? '⚙' : esc(who.charAt(0))}</span>
+              <div class="grow"><p><b>${esc(who)}</b>${m.sys || m.me ? ' · ' : ' '}${esc(m.sys || m.me ? m.text : m.text.charAt(0).toLowerCase() + m.text.slice(1))}</p><small>${ago(l.at)}</small></div></div>`; }).join('') || '<p class="empty">News from the workshop will appear here.</p>'}
+        </section>
+      </div>
+      <div class="kd-row kd-r3">
+        <section class="kd-card anim" style="--i:9"><div class="kd-head"><div><span class="kd-kicker">ORDER HEALTH</span><h3>${live.length} undelivered</h3></div></div>
+          <div class="kt-bars">${health.map(([label, count, type]) => `<div class="kt-bar-row"><span>${label}</span><div class="kt-bar-track" role="img" aria-label="${label}: ${count} orders"><i class="kt-bar-fill kt-bar-${type}" style="--bar-width:${live.length ? Math.round(count / live.length * 100) : 0}%"></i></div><b>${count}</b></div>`).join('')}</div>
+        </section>
+        <section class="kd-card anim" style="--i:10"><div class="kd-head"><div><span class="kd-kicker">TASK PROGRESS</span><h3>Workshop completion</h3></div></div>
+          <div class="kt-progress-layout"><div class="kt-donut" role="img" aria-label="${pct}% of ${tks.length} steps done" style="--pct:${pct}"><div class="kt-donut-inner"><strong>${pct}%</strong><span>complete</span></div></div>
+          <div class="kt-legend"><div><i class="kt-dot kt-done"></i><span>Done</span><b>${tDone}</b></div><div><i class="kt-dot kt-working"></i><span>In progress</span><b>${tWork}</b></div><div><i class="kt-dot kt-queued"></i><span>Waiting</span><b>${tWait}</b></div></div></div>
+        </section>
+        <section class="kd-card anim" style="--i:11"><div class="kd-head"><h3>Quick actions</h3></div>
+          <div class="kd-qa">
+            <button class="qa" data-neworder><i>＋</i><span><b>Create order</b><small>Add a job</small></span></button>
+            <button class="qa" data-tabgo="orders"><i>🌐</i><span><b>Website orders</b><small>${web.length ? web.length + ' waiting' : 'None waiting'}</small></span>${web.length ? `<em>${web.length}</em>` : ''}</button>
+            <button class="qa" data-move="out"><i>📦</i><span><b>Give out materials</b><small>From the store</small></span></button>
+            <button class="qa" data-tabgo="${ready.length ? 'orders' : 'workers'}"><i>${ready.length ? '🚚' : '👥'}</i><span><b>${ready.length ? 'Ready to deliver' : 'Workers'}</b><small>${ready.length ? ready.length + ' finished' : S.workers.filter(w => w.active).length + ' on the team'}</small></span>${ready.length ? `<em class="g">${ready.length}</em>` : ''}</button>
           </div>
-          <div class="panel anim" style="--i:7"><div class="p-head"><h3>Workshop news</h3><span class="live-dot"></span></div>
-            ${S.log.slice(0, 7).map(l => { const m = chatMsg(l); const who = m.me ? 'You' : m.from;
-              return `<div class="news ${l.kind === 'alert' && !m.me ? 'alert' : ''}"${l.order ? ` data-open="${l.order}"` : ''}><span class="news-av" style="background:${m.me ? 'var(--ink)' : m.sys ? 'var(--metal)' : colorOf(m.from)}">${m.sys ? '⚙' : esc(who.charAt(0))}</span>
-                <div class="grow"><p><b>${esc(who)}</b>${m.sys || m.me ? ' · ' : ' '}${esc(m.sys || m.me ? m.text : m.text.charAt(0).toLowerCase() + m.text.slice(1))}</p><small>${ago(l.at)}</small></div></div>`; }).join('') || '<p class="empty">News from the workshop will appear here.</p>'}
-          </div>
-        </div>
+        </section>
       </div>`;
     prevStats = st;
     return html;
+  }
+
+  /* ---------- SALES DEMAND: what customers order, and when ---------- */
+  function demandCard(){
+    const money = demandBy === 'ksh' && S.money, list = S.hist || S.orders;
+    const invByOrder = {}; if (S.money) S.money.inv.forEach(i => { if (i.order_id) invByOrder[i.order_id] = Number(i.total); });
+    const val = o => money ? (invByOrder[o.id] || 0) : o.qty;
+    const fmt = v => money ? KSH(v) : `${v} pc${v === 1 ? '' : 's'}`;
+    const short = v => money ? (v >= 1e6 ? (v / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : v >= 1e3 ? Math.round(v / 1e3) + 'k' : String(v)) : String(v);
+    const key = s => String(s).trim().toLowerCase().replace(/\s+/g, ' ').replace(/(ch|sh|x|ss)es$/, '$1').replace(/([^s])s$/, '$1');
+    const months = [...Array(6)].map((_, i) => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - (5 - i)); return { y: d.getFullYear(), m: d.getMonth(), lbl: d.toLocaleDateString('en-GB', { month:'short' }) }; });
+    const mIdx = t => { const d = new Date(t); return months.findIndex(mo => mo.y === d.getFullYear() && mo.m === d.getMonth()); };
+    const rows = list.filter(o => mIdx(o.createdAt) >= 0);
+    // items, biggest first
+    const groups = {}; rows.forEach(o => { const k = key(o.item); const g = groups[k] || (groups[k] = { name: o.item.trim(), v: 0, by: [0,0,0,0,0,0] }); const v = val(o); g.v += v; g.by[mIdx(o.createdAt)] += v; });
+    const items = Object.values(groups).filter(g => g.v > 0).sort((a, b) => b.v - a.v);
+    const total = items.reduce((a, g) => a + g.v, 0);
+    const COL = ['#1F6B53', '#B08A4F', '#6FA88F', '#D8BE8C'], OTHER = '#CBC3B3';
+    const series = items.slice(0, 3).map((g, i) => ({ name: g.name, by: g.by, v: g.v, c: COL[i] }));
+    const rest = items.slice(3); if (rest.length) series.push({ name: rest.length === 1 ? rest[0].name : 'Other items', by: [0,1,2,3,4,5].map(i => rest.reduce((a, g) => a + g.by[i], 0)), v: rest.reduce((a, g) => a + g.v, 0), c: rest.length === 1 ? COL[3] : OTHER });
+    const per = [0,1,2,3,4,5].map(i => series.reduce((a, s) => a + s.by[i], 0));
+    const cnt = [0,1,2,3,4,5].map(i => rows.filter(o => mIdx(o.createdAt) === i).length);
+    const cur = per[5], prev = per[4], ch = prev ? Math.round((cur - prev) / prev * 100) : null;
+    const busy = per.indexOf(Math.max(...per));
+    const arrow = n => n === null ? '<em class="flat">new</em>' : `<em class="${n >= 0 ? 'up' : 'down'}">${n >= 0 ? '▲' : '▼'} ${Math.abs(n)}%</em>`;
+    const pct = v => { const p = v / Math.max(1, total) * 100; return p > 0 && p < 1 ? '<1%' : Math.round(p) + '%'; };
+    // tiles
+    const tiles = [
+      [fmt(cur), 'This month', arrow(ch)],
+      [String(cnt[5]), 'Orders this month', arrow(cnt[4] ? Math.round((cnt[5] - cnt[4]) / cnt[4] * 100) : null)],
+      [items[0] ? esc(items[0].name) : '—', 'Most wanted', items[0] ? `<em class="flat">${pct(items[0].v)} of demand</em>` : ''],
+      [months[busy].lbl, 'Busiest month', `<em class="flat">${fmt(per[busy])}</em>`]
+    ];
+    // donut
+    const R = 42, C = 2 * Math.PI * R; let off = 0;
+    const arcs = series.map(s => { const len = s.v / Math.max(1, total) * C; const a = `<circle r="${R}" cx="60" cy="60" fill="none" stroke="${s.c}" stroke-width="16" stroke-dasharray="${Math.max(0, len - 1.5).toFixed(2)} ${C.toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 60 60)"><title>${esc(s.name)}: ${fmt(s.v)}</title></circle>`; off += len; return a; }).join('');
+    // grouped bars
+    const top = Math.max(1, ...series.flatMap(s => s.by)), ticks = [1, .5, 0].map(f => Math.round(top * f));
+    const bars = months.map((mo, i) => `<div class="kd-gb-m ${i === 5 ? 'now' : ''}">${series.map(s => `<i style="height:${s.by[i] ? Math.max(2, s.by[i] / top * 100) : 0}%;background:${s.c}" title="${mo.lbl} · ${esc(s.name)}: ${fmt(s.by[i])}"></i>`).join('')}</div>`).join('');
+    // weekly wave (last 12 weeks)
+    const wk = [...Array(12)].map(() => 0), now = Date.now(), W = 7 * 864e5;
+    list.forEach(o => { const w = Math.floor((now - o.createdAt) / W); if (w >= 0 && w < 12) wk[11 - w] += val(o); });
+    const wtop = Math.max(1, ...wk), P = wk.map((v, i) => [i / 11 * 100, 46 - v / wtop * 40]);
+    let d = `M${P[0][0]},${P[0][1]}`; for (let i = 0; i < P.length - 1; i++){ const p0 = P[i - 1] || P[i], p1 = P[i], p2 = P[i + 1], p3 = P[i + 2] || p2; d += ` C${(p1[0] + (p2[0] - p0[0]) / 6).toFixed(2)},${Math.min(46, p1[1] + (p2[1] - p0[1]) / 6).toFixed(2)} ${(p2[0] - (p3[0] - p1[0]) / 6).toFixed(2)},${Math.min(46, p2[1] - (p3[1] - p1[1]) / 6).toFixed(2)} ${p2[0].toFixed(2)},${p2[1].toFixed(2)}`; }
+    const wl = i => { const t = new Date(now - (11 - i) * W); return t.toLocaleDateString('en-GB', { day:'numeric', month:'short' }); };
+    const empty = !total;
+    return `<section class="kd-card kd-demand anim" style="--i:5">
+      <div class="kd-head"><div><span class="kd-kicker">SALES DEMAND</span><h3>What customers are ordering</h3></div>
+        <div class="kd-seg" role="group" aria-label="Measure demand by"><button class="${money ? '' : 'on'}" data-demand="pcs">Pieces</button>${S.money ? `<button class="${money ? 'on' : ''}" data-demand="ksh">KSh</button>` : ''}</div></div>
+      <div class="kd-dt">${tiles.map(t => `<div class="kd-dt-i"><b>${t[0]}</b><span>${t[1]}</span>${t[2]}</div>`).join('')}</div>
+      ${empty ? `<p class="empty">${money ? 'No invoices yet. Make invoices on orders to see demand in KSh.' : 'No orders in the last 6 months yet.'}</p>` : `
+      <div class="kd-dg">
+        <div class="kd-dp kd-donut2"><p class="kd-dp-t">Share of demand</p>
+          <div class="kd-dn-wrap"><svg viewBox="0 0 120 120" role="img" aria-label="Share of demand: ${series.map(s => s.name + ' ' + pct(s.v)).join(', ')}"><circle r="${R}" cx="60" cy="60" fill="none" stroke="#F1EBDF" stroke-width="16"/>${arcs}</svg><div class="kd-dn-c"><b>${pct(series[0].v)}</b><span>${esc(series[0].name)}</span></div></div>
+          <ul class="kd-lg">${series.map(s => `<li><i style="background:${s.c}"></i><span>${esc(s.name)}</span><b>${pct(s.v)}</b></li>`).join('')}</ul>
+        </div>
+        <div class="kd-dp"><div class="kd-dp-h"><p class="kd-dp-t">Demand by item · last 6 months</p><ul class="kd-lg kd-lg-row">${series.map(s => `<li><i style="background:${s.c}"></i><span>${esc(s.name)}</span></li>`).join('')}</ul></div>
+          <div class="kd-gb"><div class="kd-gb-y">${ticks.map(t => `<span>${short(t)}</span>`).join('')}</div>
+            <div class="kd-gb-p" role="img" aria-label="${months.map((mo, i) => mo.lbl + ' ' + fmt(per[i])).join(', ')}">${bars}</div></div>
+          <div class="kd-gb-x">${months.map((mo, i) => `<span class="${i === 5 ? 'now' : ''}">${mo.lbl}<small>${short(per[i])}</small></span>`).join('')}</div>
+        </div>
+      </div>
+      <div class="kd-dp kd-wave"><div class="kd-dp-h"><p class="kd-dp-t">Week by week · last 12 weeks</p><span class="kd-wave-k">This week <b>${fmt(wk[11])}</b></span></div>
+        <svg viewBox="0 0 100 50" preserveAspectRatio="none" role="img" aria-label="Weekly demand, last 12 weeks: ${wk.map((v, i) => wl(i) + ' ' + fmt(v)).join(', ')}">
+          <defs><linearGradient id="kdWave" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#B08A4F" stop-opacity=".35"/><stop offset="1" stop-color="#B08A4F" stop-opacity="0"/></linearGradient></defs>
+          ${[10, 26, 42].map(y => `<line x1="0" x2="100" y1="${y}" y2="${y}" stroke="#F1EBDF" stroke-width="1" vector-effect="non-scaling-stroke"/>`).join('')}
+          <path d="${d} L100,50 L0,50 Z" fill="url(#kdWave)"/><path d="${d}" fill="none" stroke="#1F6B53" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linecap="round"/>
+        </svg>
+        <div class="kd-wave-x">${[0, 3, 6, 9, 11].map(i => `<span style="left:${i / 11 * 100}%">${i === 11 ? 'This week' : wl(i)}</span>`).join('')}</div>
+      </div>`}
+    </section>`;
   }
 
   function settingsModal(){
@@ -773,6 +856,7 @@
     const pnh = e.target.closest('[data-pnohold]'); if (pnh) return payAct('ws_hold', { p_order: pnh.dataset.pnohold, p_hold: false }, 'The workshop can start this order now', pnh.dataset.pnohold);
     const phd = e.target.closest('[data-phold]'); if (phd) return payAct('ws_hold', { p_order: phd.dataset.phold, p_hold: true }, 'This order now waits for the half payment', phd.dataset.phold);
     if (e.target.closest('#paySetGo')) return settingsModal();
+    const dm = e.target.closest('[data-demand]'); if (dm){ demandBy = dm.dataset.demand; try { localStorage.setItem('kt-demand', demandBy); } catch (er) {} render(); return; }
     if (e.target.closest('#binOpen')) return binModal();
     const bb = e.target.closest('[data-binback]'); if (bb && !bb.disabled){ bb.disabled = true;
       const { data, error } = await db.rpc('ws_bin_restore', { p_id: +bb.dataset.binback });
