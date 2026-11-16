@@ -1,1 +1,0 @@
-Kartech original-palette charts update. Copy owner.html, js/owner.js, and css/kartech-charts.css into your EXISTING kartech-system folder. Do not copy README unless wanted. This restores the original warm cream/green/gold owner design and adds live order-health and task-completion charts. No SQL or finance changes. Keep a git backup and preview before committing.
