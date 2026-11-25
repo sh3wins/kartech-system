@@ -105,7 +105,7 @@ window.KPDF = (() => {
   function stamp(doc, x, y, big, small){
     doc.saveGraphicsState && doc.saveGraphicsState();
     doc.setTextColor(...C.green); doc.setFont('helvetica', 'bold');
-    doc.setFontSize(20); doc.text(big, x, y, { angle: 12, charSpace: 1.2 });
+    doc.setFontSize(big.length > 6 ? 14 : 20); doc.text(big, x, y, { angle: 12, charSpace: big.length > 6 ? 0.8 : 1.2 });
     doc.setFontSize(6.5); doc.text(small, x + 0.6, y + 4.4, { angle: 12, charSpace: 0.5 });
     doc.restoreGraphicsState && doc.restoreGraphicsState();
   }
@@ -150,6 +150,23 @@ window.KPDF = (() => {
     const yS = y;
     y = sums(doc, y, [['Invoice total', money(inv.total)], ['Paid so far', money(paidSoFar)], ['Balance due', money(Math.max(0, balance)), true]]);
     stamp(doc, 18, yS + 9, balance <= 0 ? 'PAID IN FULL' : 'PAID', (kind.toUpperCase() + ' · ' + day(pay.created_at).toUpperCase()));
+    // a personal note: welcome on the first payment, thank you on every one
+    const first = String(inv.customer || '').replace(/(\+?254|0)[17]\d{2}\s?\d{3}\s?\d{3}/, '').trim().split(/\s+/)[0] || '';
+    const hi = first ? first.charAt(0).toUpperCase() + first.slice(1) : '';
+    const firstPay = paidSoFar <= Number(pay.amount) + 0.001;
+    const note = balance <= 0
+      ? [(hi ? 'Thank you, ' + hi + '!' : 'Thank you!'), 'Your order is fully paid. It has been a pleasure making it for you, and we hope it serves you well for many years. We look forward to working with you again.']
+      : firstPay
+        ? [(hi ? 'Welcome to Kartech, ' + hi + '!' : 'Welcome to Kartech!'), 'Thank you for choosing us. Your order is now in our workshop and our team has started on it. You can follow every step on your order page.']
+        : [(hi ? 'Thank you, ' + hi + '!' : 'Thank you!'), 'We have received your payment. Your order is moving along in our workshop, and we will let you know as soon as it is ready.'];
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.6);
+    const lines = doc.splitTextToSize(note[1], 114), nTop = Math.max(y + 6, 150);
+    if (nTop + 9 + lines.length * 3.8 < 182){
+      doc.setFillColor(...C.soft); doc.roundedRect(12, nTop, 124, 9 + lines.length * 3.8, 3, 3, 'F');
+      doc.setDrawColor(...C.gold); doc.setLineWidth(0.8); doc.line(12.4, nTop + 2, 12.4, nTop + 7 + lines.length * 3.8);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...C.forest); doc.text(note[0], 17, nTop + 5.8);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8.6); doc.setTextColor(...C.ink); doc.text(lines, 17, nTop + 10.4);
+    }
     await foot(doc, ['Received and confirmed by Kartech Engineering.', 'Thank you for your business. Please keep this receipt.', balance > 0 ? 'The balance is due before delivery.' : 'Fully paid. Thank you!'], pay.check_code);
     return doc.output('blob');
   }
