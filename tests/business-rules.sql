@@ -191,6 +191,39 @@ begin
     exception when others then res := res || ('PASS|A wrong Order Room link shows nothing|' || sqlerrm); end;
     execute 'reset role';
 
+    -- ---------- shop products (update 26) ----------
+    if to_regclass('public.kt_products') is not null then
+      perform set_config('request.jwt.claim.sub', '', true);
+      perform set_config('request.jwt.claims', '{"role":"anon"}', true);
+      execute 'set local role anon';
+      begin
+        perform public.kt_save_product('{"name":"Hack"}'::jsonb);
+        res := res || 'FAIL|A stranger cannot add a shop product|it was added'::text;
+      exception when others then res := res || ('PASS|A stranger cannot add a shop product|' || sqlerrm); end;
+      execute 'reset role';
+      perform set_config('request.jwt.claim.sub', station_id::text, true);
+      perform set_config('request.jwt.claims', json_build_object('sub', station_id, 'role', 'authenticated')::text, true);
+      execute 'set local role authenticated';
+      begin
+        perform public.kt_save_product('{"name":"Hack"}'::jsonb);
+        res := res || 'FAIL|The workshop computer cannot change the shop|it was added'::text;
+      exception when others then res := res || ('PASS|The workshop computer cannot change the shop|' || sqlerrm); end;
+      execute 'reset role';
+      perform set_config('request.jwt.claim.sub', owner_id::text, true);
+      perform set_config('request.jwt.claims', json_build_object('sub', owner_id, 'role', 'authenticated')::text, true);
+      execute 'set local role authenticated';
+      msg := public.kt_save_product('{"name":"TEST hidden piece","price":"1200","active":false}'::jsonb);
+      res := res || format('%s|The owner can add a shop product with a price|%s', case when (select price from public.kt_products where id = msg) = 1200 then 'PASS' else 'FAIL' end, msg);
+      execute 'reset role';
+      perform set_config('request.jwt.claim.sub', '', true);
+      perform set_config('request.jwt.claims', '{"role":"anon"}', true);
+      execute 'set local role anon';
+      select count(*) into n from public.kt_products where id = msg;
+      res := res || format('%s|A hidden product does not show on the website|%s visible', case when n = 0 then 'PASS' else 'FAIL' end, n);
+      execute 'reset role';
+      msg := null;
+    end if;
+
     -- ---------- as the OWNER again: the Bin ----------
     perform set_config('request.jwt.claim.sub', owner_id::text, true);
     perform set_config('request.jwt.claims', json_build_object('sub', owner_id, 'role', 'authenticated')::text, true);

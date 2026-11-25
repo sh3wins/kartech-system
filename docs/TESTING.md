@@ -10,7 +10,7 @@ There are two kinds of checks: **automatic tests** that run in Supabase in a few
 
 **Is it safe on the live project?** Yes. The test makes a pretend order for "TEST CUSTOMER", then **undoes everything at the end**: no order, invoice, receipt or message is kept, and no client is contacted. If the project has no owner or workshop account yet, it makes pretend ones for the test and removes them too.
 
-### What the 31 tests cover
+### What the 35 tests cover
 
 **Orders**
 - the owner can create an order
@@ -50,6 +50,11 @@ There are two kinds of checks: **automatic tests** that run in Supabase in a few
 
 **Strangers**
 - they can't record payments or delete orders
+
+**Shop products**
+- strangers and the workshop computer can't change the shop
+- the owner can add a product with a price
+- a hidden product doesn't show on the website
 
 **Bin**
 - a deleted order leaves the list, goes to the Bin and can be brought back

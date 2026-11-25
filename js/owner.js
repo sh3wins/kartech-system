@@ -113,6 +113,9 @@
       const d6 = new Date(); d6.setDate(1); d6.setMonth(d6.getMonth() - 5); d6.setHours(0, 0, 0, 0);
       const hs = await db.from('ws_orders').select('id,item,qty,created_at').gte('created_at', d6.toISOString()).order('created_at', { ascending:false }).limit(2000);
       S.hist = hs.error ? null : hs.data.map(x => ({ id:x.id, item:x.item, qty:x.qty, createdAt:new Date(x.created_at).getTime() }));
+      // the website shop's products (update-26)
+      const pr = await db.from('kt_products').select('*').order('sort').order('name');
+      S.prods = pr.error ? null : pr.data;
       loaded = true;
       loadDay();
       announceChanges();
@@ -194,6 +197,8 @@
   }
   /* ---------- DASHBOARD ---------- */
   let enter = true, prevStats = {}, seenAtt = null, orderFilter = null;
+  let stockMode = 'shop'; try { stockMode = localStorage.getItem('kt-stockmode') || 'shop'; } catch (e) {}
+  let shopFilter = 'All';
   let demandBy = 'pcs'; try { demandBy = localStorage.getItem('kt-demand') || 'pcs'; } catch (e) {}
   let orderSrc = 'all'; try { orderSrc = localStorage.getItem('kt-osrc') || 'all'; } catch (e) {}
   const srcOf = o => (o.srcNo || o.reqId) ? 'online' : 'shop';
@@ -838,6 +843,10 @@
     const gb = e.target.closest('[data-go]'); if (gb){ const [t, f] = gb.dataset.go.split(':'); tab = t; orderFilter = f || null; enter = true; render(); window.scrollTo(0,0); return; }
     const mvb = e.target.closest('[data-move]'); if (mvb) return moveModal(mvb.dataset.move, mvb.dataset.mat);
     const cb = e.target.closest('[data-cnt]'); if (cb) return countModal(cb.dataset.cnt);
+    const smb = e.target.closest('[data-smode]'); if (smb){ stockMode = smb.dataset.smode; try { localStorage.setItem('kt-stockmode', stockMode); } catch (er) {} enter = true; return render(); }
+    const sfb = e.target.closest('[data-sfilter]'); if (sfb){ shopFilter = sfb.dataset.sfilter; return render(); }
+    const spb = e.target.closest('[data-prod]'); if (spb) return productModal(spb.dataset.prod);
+    if (e.target.closest('[data-addprod]')) return productModal(null);
     if (e.target.closest('[data-addmat]')) return materialModal();
     if (e.target.closest('[data-addtool]')) return toolModal();
     if (e.target.closest('[data-fmcode]')) return fmCodeModal();
@@ -1711,7 +1720,105 @@
     setTimeout(() => s.querySelector('#tName').focus(), 50);
   }
 
+  const stockToggle = () => `<div class="kd-seg sp-mode" role="group" aria-label="Show"><button class="${stockMode === 'shop' ? 'on' : ''}" data-smode="shop">Shop products</button><button class="${stockMode === 'tools' ? 'on' : ''}" data-smode="tools">Tools &amp; materials</button></div>`;
+  /* ---------- SHOP PRODUCTS: what customers see on the website ---------- */
+  const SHOP_SITE = 'https://sh3wins.github.io/kartech-website/';
+  const SHOP_TAGS = ['Furniture', 'Waiting seats', 'Catering equipment', 'Outdoor'];
+  const SHOP_BUCKET = 'shop-photos';
+  const shopImg = s => !s ? '' : /^(https?:|\/|blob:|data:)/.test(s) ? s : SHOP_SITE + s;
+  const shopPath = u => { const m = String(u || '').match(/\/shop-photos\/(.+)$/); return m ? decodeURIComponent(m[1]) : null; };
+  function viewShop(){
+    if (!S.prods) return `${stockToggle()}<div class="d-head anim"><div><h1>Shop products</h1></div></div>
+      <div class="card"><p>Run <b>update-26-shop-products.sql</b> in Supabase to manage the website shop from here.</p></div>`;
+    const all = S.prods, noPic = all.filter(p => !(p.images || []).length), hidden = all.filter(p => !p.active), noPrice = all.filter(p => p.price == null && p.active);
+    const list = shopFilter === 'All' ? all : shopFilter === 'nophoto' ? noPic : shopFilter === 'hidden' ? hidden : all.filter(p => (p.tags || []).includes(shopFilter));
+    const chip = (k, label, n) => `<button class="sp-f ${shopFilter === k ? 'on' : ''}" data-sfilter="${esc(k)}">${label}${n != null ? ` <small>${n}</small>` : ''}</button>`;
+    return `${stockToggle()}
+      <div class="d-head anim" style="--i:0"><div><h1>Shop products</h1><p class="sub" style="margin:0">What customers see in the shop on the website. Add a product or a photo here and it shows on the website straight away.</p></div>
+        <span class="st-btns"><a class="btn line" href="${SHOP_SITE}#shop" target="_blank" rel="noopener">See the shop</a><button class="btn" data-addprod>+ Add product</button></span></div>
+      <div class="sp-filters anim" style="--i:1">${chip('All', 'All', all.length)}${SHOP_TAGS.map(t => chip(t, t, all.filter(p => (p.tags || []).includes(t)).length)).join('')}${noPic.length ? chip('nophoto', 'No photo yet', noPic.length) : ''}${hidden.length ? chip('hidden', 'Hidden', hidden.length) : ''}</div>
+      ${noPrice.length && shopFilter === 'All' ? `<p class="sp-note anim" style="--i:2">${noPrice.length} product${noPrice.length === 1 ? ' shows' : 's show'} "Price on request". Tap a product to add its price whenever you're ready.</p>` : ''}
+      <div class="sp-grid">${list.length ? list.map((p, i) => `<button class="sp-card anim ${p.active ? '' : 'off'}" style="--i:${Math.min(i + 2, 12)}" data-prod="${esc(p.id)}">
+          <span class="sp-ph">${(p.images || [])[0] ? `<img src="${esc(shopImg(p.images[0]))}" alt="" loading="lazy">` : '<span class="sp-none">Add a photo</span>'}${(p.images || []).length > 1 ? `<i class="sp-n">${p.images.length} photos</i>` : ''}${p.active ? '' : '<i class="sp-hid">Hidden</i>'}</span>
+          <b>${esc(p.name)}</b><span class="sp-pr">${p.price == null ? 'Price on request' : KSH(p.price)}</span><small>${esc((p.tags || []).join(', ') || 'No category')}</small></button>`).join('')
+        : `<p class="empty">${shopFilter === 'nophoto' ? 'Every product has a photo.' : 'Nothing here yet.'}</p>`}</div>`;
+  }
+
+  function productModal(id){
+    if (!S.prods) return toast('Run update-26-shop-products.sql in Supabase first.');
+    const orig = id ? S.prods.find(p => p.id === id) : null;
+    const d = orig ? JSON.parse(JSON.stringify(orig)) : { name:'', price:null, images:[], tags:[], space:'', material:'', about:'', availability:'In stock', active:true };
+    const fresh = [];   // photos uploaded in this window and not saved yet
+    let sure = false;
+    const sc = openModal(`<div class="sp-m">
+      <h2>${orig ? 'Edit product' : 'Add a product'}</h2>
+      <div class="sp-pics" id="spPics"></div>
+      <label class="field"><span>Name</span><input id="spName" maxlength="120" value="${esc(d.name)}" placeholder="e.g. Rope-back bar stool"></label>
+      <label class="field"><span>Price in KSh <em>(leave empty for "Price on request")</em></span><input id="spPrice" inputmode="decimal" value="${d.price == null ? '' : esc(d.price)}" placeholder="e.g. 4500"></label>
+      <div class="field"><span>Shop tab</span><div class="sp-tags">${SHOP_TAGS.map(t => `<button type="button" class="sp-f ${(d.tags || []).includes(t) ? 'on' : ''}" data-tag="${esc(t)}">${t}</button>`).join('')}</div></div>
+      <label class="field"><span>Where it's used</span><input id="spSpace" maxlength="80" value="${esc(d.space || '')}" placeholder="e.g. Bars & cafés"></label>
+      <label class="field"><span>Material</span><input id="spMat" maxlength="160" value="${esc(d.material || '')}" placeholder="e.g. Steel frame, leatherette seat"></label>
+      <label class="field"><span>About this piece</span><textarea id="spAbout" rows="3" maxlength="1500" placeholder="What it is, sizes, colours you can make it in…">${esc(d.about || '')}</textarea></label>
+      <label class="field"><span>Availability</span><input id="spAv" maxlength="60" value="${esc(d.availability || '')}" placeholder="In stock, or Made to order"></label>
+      <label class="sp-show"><input type="checkbox" id="spActive" ${d.active ? 'checked' : ''}> Show on the website</label>
+      <div class="sp-act">
+        ${orig ? `<button class="btn line red" id="spDel">Delete</button><button class="btn line" id="spTop">Move to top</button>` : ''}
+        <span class="grow"></span><button class="btn line" id="spCancel">Cancel</button><button class="btn" id="spSave">${orig ? 'Save' : 'Add to shop'}</button>
+      </div>
+      <input type="file" id="spFile" accept="image/*" multiple hidden>
+    </div>`);
+    const q = s => sc.querySelector(s);
+    const drawPics = () => {
+      q('#spPics').innerHTML = d.images.map((u, i) => `<div class="sp-pic ${i === 0 ? 'main' : ''}"><img src="${esc(shopImg(u))}" alt="Photo ${i + 1}">
+          ${i === 0 ? '<i>Main photo</i>' : `<button type="button" data-main="${i}">Make main</button>`}<button type="button" class="x" data-rm="${i}" aria-label="Remove photo">✕</button></div>`).join('')
+        + (d.images.length < 8 ? `<button type="button" class="sp-add" id="spAdd"><b>+</b>${d.images.length ? 'Add more photos' : 'Add photos'}<small>Take one or pick from the phone</small></button>` : '');
+    };
+    drawPics();
+    const tidy = async paths => { const p = paths.map(shopPath).filter(Boolean); if (p.length && db.storage) try { await db.storage.from(SHOP_BUCKET).remove(p); } catch (er) {} };
+    sc.addEventListener('click', async e => {
+      if (e.target === sc || e.target.closest('[data-x]') || e.target.closest('#spCancel')){ tidy(fresh.filter(u => !(orig && orig.images.includes(u)))); return; }
+      const t = e.target.closest('[data-tag]'); if (t){ t.classList.toggle('on'); return; }
+      if (e.target.closest('#spAdd')) return q('#spFile').click();
+      const mn = e.target.closest('[data-main]'); if (mn){ const [x] = d.images.splice(+mn.dataset.main, 1); d.images.unshift(x); return drawPics(); }
+      const rm = e.target.closest('[data-rm]'); if (rm){ d.images.splice(+rm.dataset.rm, 1); return drawPics(); }
+      if (e.target.closest('#spTop')){ const { error } = await db.rpc('kt_move_product', { p_id: orig.id, p_to: 'top' }); if (error) return toast(errMsg(error)); closeModal(); toast(`${orig.name} is now first in the shop`); await load(); return; }
+      const del = e.target.closest('#spDel'); if (del){
+        if (!sure){ sure = true; del.textContent = 'Tap again to delete'; del.classList.add('sure'); setTimeout(() => { if (document.body.contains(del)){ sure = false; del.textContent = 'Delete'; del.classList.remove('sure'); } }, 4000); return; }
+        del.disabled = true; const { data, error } = await db.rpc('kt_delete_product', { p_id: orig.id });
+        if (error){ del.disabled = false; return toast(errMsg(error)); }
+        await tidy([...(data || []), ...fresh]); closeModal(); toast(`${orig.name} deleted from the shop`); await load(); return; }
+      const sv = e.target.closest('#spSave'); if (!sv) return;
+      const name = q('#spName').value.trim(), priceTxt = q('#spPrice').value.replace(/[^\d.]/g, '');
+      if (!name){ q('#spName').focus(); return toast('Give the product a name'); }
+      if (q('#spPrice').value.trim() && !priceTxt) return toast('The price must be a number');
+      const body = { id: orig ? orig.id : null, name, price: priceTxt || null, images: d.images,
+        tags: [...sc.querySelectorAll('[data-tag].on')].map(b => b.dataset.tag), space: q('#spSpace').value, material: q('#spMat').value,
+        about: q('#spAbout').value, availability: q('#spAv').value, active: q('#spActive').checked };
+      sv.disabled = true; sv.textContent = 'Saving…';
+      const { error } = await db.rpc('kt_save_product', { p: body });
+      if (error){ sv.disabled = false; sv.textContent = orig ? 'Save' : 'Add to shop'; return toast(errMsg(error)); }
+      if (orig) tidy(orig.images.filter(u => !d.images.includes(u)));   // photos she removed
+      closeModal(); toast(body.active ? `${name} saved. It's on the website now.` : `${name} saved (hidden from the website).`); await load();
+    });
+    q('#spFile').addEventListener('change', async e => {
+      const files = [...e.target.files].slice(0, 8 - d.images.length); e.target.value = '';
+      for (const f of files){
+        const add = q('#spAdd'); if (add) add.innerHTML = '<b>…</b>Uploading';
+        try {
+          if (!db.storage) throw new Error('Photos need the real Supabase');
+          const blob = await shrink(f), path = `p/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+          const up = await db.storage.from(SHOP_BUCKET).upload(path, blob, { contentType:'image/jpeg', upsert:false });
+          if (up.error) throw up.error;
+          const url = db.storage.from(SHOP_BUCKET).getPublicUrl(path).data.publicUrl;
+          d.images.push(url); fresh.push(url);
+        } catch (er){ toast(/bucket|not found/i.test(errMsg(er)) ? 'Run update-26-shop-products.sql in Supabase to turn on shop photos.' : errMsg(er)); }
+        drawPics();
+      }
+    });
+  }
+
   function viewStock(){
+    if (stockMode === 'shop') return viewShop();
     const mats = S.mats.filter(m => m.active);
     const watch = watchList();
     const moveTxt = x => { const m = M(x.mat), w = x.worker && W(x.worker), o = x.order && O(x.order); if (!m) return '';
@@ -1722,6 +1829,7 @@
     const stdByProd = {};
     S.std.forEach(s => (stdByProd[s.product] = stdByProd[s.product] || []).push(s));
     return `
+      ${stockToggle()}
       <div class="d-head anim" style="--i:0"><div><h1>Stock &amp; tools</h1><p class="sub" style="margin:0">Raw materials in the store and the workshop tools. Only you can change these.</p></div>
         <span class="st-btns"><button class="btn line" data-addmat>+ Add material</button><button class="btn" data-move="out">Give out</button></span></div>
       ${watch.length ? `<div class="panel watch anim" style="--i:1"><div class="p-head"><h3>⚠ Watch list <span class="count">${watch.length}</span></h3></div>
