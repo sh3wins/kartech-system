@@ -1,0 +1,107 @@
+/* =====================================================================
+   KARTECH · "Workshop atelier" look for the apps
+   (owner app, workshop screen, front door, receipt check)
+   Loads LAST, so it overrides the older themes. Same colours and type as
+   the website: powder-coated forest green, brushed brass, zinc-plated steel.
+   ===================================================================== */
+:root{
+  --deep:#12302A; --deep2:#0A1F1A; --deep3:#1B4038;
+  --lime:#B8925A; --lime2:#9E7A45; --lime-soft:#F0E8DA;
+  --bg:#ECEFED; --card:#FFFFFF; --ink:#1E2422; --muted:#5F6B67; --line:#D9DFDC;
+  --r-lg:14px; --r-md:10px; --r-sm:8px;
+  --shadow:0 1px 0 rgba(18,48,42,.05), 0 1px 3px rgba(18,48,42,.06);
+  --shadow-up:0 2px 4px rgba(18,48,42,.06), 0 14px 32px rgba(18,48,42,.10);
+  --head:'Fraunces', Georgia, serif;
+  --body:'DM Sans', system-ui, sans-serif;
+  --forest:var(--deep); --forest2:var(--deep2); --leaf:var(--deep); --leaf-soft:var(--lime-soft);
+  --green:var(--deep); --green-dim:var(--deep2); --green-soft:#E3EAE6; --paper:var(--bg);
+  /* status colours: calmer, still clearly different */
+  --c-late:#B4432F; --c-late-bg:#F6E7E2;
+  --c-urg:#B7791F;  --c-urg-bg:#F5EBD8;
+  --c-wait:#3D6680; --c-wait-bg:#E3ECF1;
+  --c-work:#2F6B55; --c-work-bg:#E1ECE6;
+  --red:#B4432F; --red-soft:#F6E7E2; --amber:#9A6A12; --amber-soft:#F5EBD8; --blue:#3D6680; --blue-soft:#E3ECF1;
+  --late:var(--c-late); --urg:var(--c-urg);
+}
+html, body{ font-family:var(--body); -webkit-font-smoothing:antialiased }
+body.dash, body.sw{ background:var(--bg); color:var(--ink) }
+::selection{ background:var(--lime); color:#fff }
+:focus-visible{ outline:2px solid var(--lime); outline-offset:2px }
+
+/* headings: light, large-optical-size Fraunces */
+h1, h2, .kd-top h1, .kd-head h3, .kd-plan h3, .modal h2, .sheet h2{
+  font-family:var(--head) !important; font-weight:400 !important; letter-spacing:-.015em;
+  font-variation-settings:'opsz' 72, 'SOFT' 0, 'WONK' 0;
+}
+.kd-top h1{ font-size:34px !important; font-weight:350 !important; font-variation-settings:'opsz' 144 }
+/* small labels: sentence case, not shouted */
+.kd-kicker, .section-title, .k, .eyebrow{ text-transform:none !important; letter-spacing:0 !important; font-weight:600 !important; font-size:13px !important; color:var(--muted) !important }
+
+/* buttons: flat, crisp corners, brass for the main action */
+.btn{ border-radius:8px; font-weight:600; letter-spacing:.005em; box-shadow:none !important }
+.fab, .kd-top .btn:not(.line), .btn.gold, .btn.lime{ background:var(--lime) !important; color:#13201C !important }
+.btn.line{ background:transparent; border:1px solid var(--line); color:var(--ink) }
+
+/* ---------- sidebar ---------- */
+.side{ background:var(--deep2) !important; border-right:1px solid rgba(184,146,90,.18) }
+.side .logo, .logo{ font-family:var(--head) !important; font-weight:600 !important; letter-spacing:.02em !important; font-variation-settings:'opsz' 48 }
+.side .tabs button{ color:#B7C4BF; border-radius:8px }
+.side .tabs button:hover{ background:rgba(255,255,255,.05); color:#fff }
+.side .tabs button.on{ background:rgba(184,146,90,.14) !important; color:#F2E6CF !important; box-shadow:inset 0 0 0 1px rgba(184,146,90,.35) }
+.side .tabs button.on::before{ background:var(--lime) !important; width:2px }
+.side .tabs .badge{ background:var(--c-late); animation:none }
+.side-sw{ background:transparent !important; border:1px solid rgba(184,146,90,.35) !important; border-radius:10px !important }
+@media (max-width:900px){
+  .side{ background:#fff !important; border-right:0 }
+  .side .tabs button.on{ background:none !important; box-shadow:none; color:var(--deep) !important }
+  .side .tabs button.on::before{ background:var(--lime) !important; height:2px; width:auto }
+  .mbar{ background:var(--deep2) !important }
+}
+
+/* ---------- dashboard cards ---------- */
+.kd-card, .card, .kpi{ border-radius:var(--r-lg) !important; box-shadow:var(--shadow) !important; border:1px solid var(--line) !important; background:#fff }
+.kpi{ background:#fff !important; padding:18px 20px 16px }
+.kpi::after{ display:none !important }
+.kpi .kpi-ic{ width:10px; height:10px; font-size:0; background:var(--c) !important; box-shadow:0 0 0 4px var(--bg) }
+.kpi .kpi-ic *{ display:none }
+.kpi-top{ font-weight:600; color:var(--ink); font-size:14.5px }
+.kpi b{ font-family:var(--head) !important; font-weight:300 !important; font-size:52px !important; color:var(--ink) !important; letter-spacing:-.03em; font-variation-settings:'opsz' 144 }
+.kpi .kpi-view{ color:var(--c) !important }
+.kpi.on{ background:#fff !important; border-color:var(--line) !important; box-shadow:inset 0 3px 0 var(--c), var(--shadow) !important }
+.kd-k .on, .k-working.on{ color:inherit }
+/* the dark "today's plan" panel */
+.kd-plan{ background:var(--deep) !important; background-image:none !important; border-color:var(--deep) !important }
+.kd-plan::before, .kd-plan::after{ display:none !important }
+.kd-plan .kd-kicker{ color:#D9BE8E !important }
+/* charts in brass and green */
+.kd-bars i, .kd-bar i{ background:#9FB5AC }
+.kd-dt-i, .kd-dp{ background:#F6F8F7 !important; border-color:var(--line) !important; border-radius:10px !important }
+.kd-dt-i b, .kd-dn-c b{ font-family:var(--head) !important; font-weight:350 !important; font-variation-settings:'opsz' 72 }
+.kd-seg{ background:var(--bg) !important }
+
+/* lists and rows */
+.row, .o-row, .kd-ord{ border-radius:10px }
+.pill, .chip{ border-radius:999px }
+.toast{ background:var(--deep2) !important; color:#fff; border:1px solid rgba(184,146,90,.4) }
+
+/* labels above headings are not needed: the heading says it */
+.kd-kicker{ display:none !important }
+.kd-plan-head{ justify-content:flex-end !important; margin-bottom:-6px }
+.kd-orb{ display:none !important }
+.kd-plan h3{ font-size:26px !important }
+.kd-plan li{ background:rgba(255,255,255,.05) !important; border:1px solid rgba(255,255,255,.06); border-radius:8px !important; font-size:14px }
+.kd-plan li.warn{ background:rgba(184,146,90,.14) !important; border-color:rgba(184,146,90,.3) }
+.kd-plan li span{ font-size:0 !important; width:6px; height:6px; border-radius:50%; background:#D9BE8E; margin-top:7px }
+.kd-plan li.warn span{ background:#E39B7F }
+.kd-plan .brief-say{ background:transparent !important; border:1px solid rgba(217,190,142,.45) !important; color:#E9DCC3 !important }
+
+/* status cards: a small coloured dot instead of a big icon */
+.kpi .kpi-ic{ width:10px !important; height:10px !important; border-radius:50% !important; font-size:0 !important; padding:0 }
+.kpi .kpi-ic::after{ display:none !important }
+.k-working.on{ background:#fff !important }
+.k-working.on .kpi-top, .k-working.on .kpi-sub{ color:inherit !important }
+.k-working.on .kpi-sub{ color:var(--muted) !important }
+.k-working.on b{ color:var(--ink) !important }
+.k-working.on .kpi-view{ color:var(--c) !important }
+.k-working.on .kpi-ic{ background:var(--c) !important }
+.k-working.on::before{ display:none !important }
