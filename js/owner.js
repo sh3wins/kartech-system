@@ -441,11 +441,11 @@
       .sort((a,b) => URG[a.urgency] - URG[b.urgency] || a.deadline - b.deadline);
     const delivered = S.orders.filter(o => o.delivered).filter(bySrc);
     const row = o => { const p = orderProgress(o); const late = !p.finished && isLate(o.deadline);
-      return `<button class="order" data-open="${o.id}">
+      return `<div class="o-wrap"><button class="order" data-open="${o.id}">
         <div><div class="ref">${o.ref} <span class="pill p-${o.urgency}">${URG_NAME[o.urgency]}</span>${o.srcNo ? ` <span class="pill p-web">🌐 ${esc(o.srcNo)}</span>` : ''}${o.by === 'manager' ? ' <span class="pill p-mgr">👤 Manager</span>' : ''}${o.reqId ? ' <span class="pill p-web">📝 Quote</span>' : ''}${o.approvedAt ? ' <span class="pill p-done">✓ Approved</span>' : ''}${payPill(o)}</div><div style="color:var(--muted);font-size:13px">${o.qty} × ${esc(o.item)} · ${esc(o.customer)}</div></div>
         ${pipe(o)}
         <div class="due ${late && !o.delivered ? 'late' : ''}">${o.delivered ? 'Delivered' : p.finished ? '<span class="pill p-done">Ready</span>' : 'Due ' + fmtDay(o.deadline)}</div>
-      </button>`; };
+      </button><button class="o-del" data-odel="${o.id}" aria-label="Delete ${o.ref}" title="Delete ${o.ref}">🗑</button></div>`; };
     const web = orderSrc === 'shop' ? [] : waitingWeb();
     const waitingIn = waitingWeb().length + (S.reqs || []).length;
     const srcTab = (id, label, n, hint) => `<button class="src-tab ${orderSrc === id ? 'on' : ''}" data-osrc="${id}"><b>${label}</b>${n != null ? `<span>${n}</span>` : ''}${hint ? `<small>${hint}</small>` : ''}</button>`;
@@ -901,6 +901,16 @@
     if (e.target.closest('#clearFilter')){ orderFilter = null; enter = true; render(); return; }
     if (e.target.closest('#sideSet') || e.target.closest('#mSet')) return settingsModal();
     const ew = e.target.closest('[data-editw]'); if (ew) return workerModal(ew.dataset.editw);
+    const odl = e.target.closest('[data-odel]'); if (odl){
+      const o = O(odl.dataset.odel); if (!o) return;
+      if (!odl.classList.contains('sure')){
+        document.querySelectorAll('.o-del.sure').forEach(x => { x.classList.remove('sure'); x.textContent = '🗑'; });
+        odl.classList.add('sure'); odl.textContent = 'Delete?'; toast(`Tap "Delete?" again to move ${o.ref} to the 🗑 Bin. You can bring it back for 30 days.`);
+        setTimeout(() => { if (document.body.contains(odl) && !odl.disabled){ odl.classList.remove('sure'); odl.textContent = '🗑'; } }, 4000); return; }
+      odl.disabled = true; odl.textContent = '…';
+      const { error } = await db.rpc('ws_delete_order', { p_order: o.id });
+      if (error){ odl.disabled = false; odl.classList.remove('sure'); odl.textContent = '🗑'; return toast(/ws_delete_order/.test(errMsg(error)) ? 'Run update-9-edit-orders.sql in Supabase first.' : errMsg(error)); }
+      toast(`${o.ref} moved to the 🗑 Bin. You can bring it back for 30 days.`); await load(); return; }
     const b = e.target.closest('[data-tabgo],[data-open],[data-solve],[data-deliver],[data-up],[data-down]');
     if (!b) return;
     if (b.dataset.tabgo){ closeModal(); tab = b.dataset.tabgo; orderFilter = null; enter = true; render(); window.scrollTo(0,0); }
@@ -1601,9 +1611,21 @@
         ${!o.delivered && o.urgency !== 'urgent' && !p.finished ? `<button class="btn red" id="mkUrgent">Make urgent</button>` : ''}
         ${p.finished && !o.delivered ? `<button class="btn" data-deliver="${o.id}">Mark delivered</button>` : ''}
         ${!o.delivered ? `<button class="btn line" id="edOrder">✏️ Edit</button>` : ''}
+        <button class="btn red line" id="odDel">🗑 Delete</button>
         <button class="btn line" data-x>Close</button>
-      </div>`);
+      </div>
+      <p id="odDelMsg" class="hint-sm" style="color:var(--red);min-height:0;margin-top:8px"></p>`);
     const eb = $('#edOrder'); if (eb) eb.onclick = () => editOrderModal(o.id);
+    const odd = $('#odDel'); let oddSure = false;
+    if (odd) odd.onclick = async () => {
+      if (!oddSure){ oddSure = true; odd.classList.remove('line'); odd.textContent = 'Tap again to delete';
+        $('#odDelMsg').textContent = `${o.ref} goes to the 🗑 Bin for 30 days, so you can bring it back. Anyone working on it gets their next job.`;
+        setTimeout(() => { if (document.body.contains(odd) && !odd.disabled){ oddSure = false; odd.classList.add('line'); odd.textContent = '🗑 Delete'; const m = $('#odDelMsg'); if (m) m.textContent = ''; } }, 5000); return; }
+      odd.disabled = true; odd.textContent = 'Deleting…';
+      const { error } = await db.rpc('ws_delete_order', { p_order: o.id });
+      if (error){ odd.disabled = false; odd.textContent = '🗑 Delete'; $('#odDelMsg').textContent = /ws_delete_order/.test(errMsg(error)) ? 'Run update-9-edit-orders.sql in Supabase first.' : errMsg(error); return; }
+      closeModal(); toast(`${o.ref} moved to the 🗑 Bin. You can bring it back for 30 days.`); await load();
+    };
     loadPhotos(o.id);
     if (o.room && !o.delivered){ loadRoomMsgs(o.id);
       $('#roomReply').onsubmit = async e => { e.preventDefault(); const t = $('#roomIn').value.trim(); if (!t) return;

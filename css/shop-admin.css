@@ -42,3 +42,12 @@
 .mo-with input{ width:20px; height:20px; flex:none; margin-top:1px; accent-color:var(--deep,#185844) }
 .mo-with small{ display:block; font-weight:400; color:var(--muted); font-size:12.5px }
 .mo-views{ display:flex; gap:8px; flex-wrap:wrap; justify-content:center }
+
+/* delete straight from the orders list */
+.o-wrap{ position:relative; border-top:1px solid #EEF1E8 }
+.o-wrap:first-child{ border-top:0 }
+.o-wrap .order{ border-top:0; padding-right:64px }
+.o-del{ position:absolute; right:12px; top:50%; transform:translateY(-50%); min-width:40px; height:40px; border-radius:12px; border:1px solid var(--line); background:#fff; font-size:16px; cursor:pointer; padding:0 8px; font-family:inherit; color:var(--ink) }
+.o-del:hover{ border-color:var(--c-late,#E5484D) }
+.o-del.sure{ background:var(--c-late,#E5484D); border-color:var(--c-late,#E5484D); color:#fff; font-size:13px; font-weight:700 }
+@media (max-width:900px){ .o-del{ top:14px; transform:none } }
