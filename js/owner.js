@@ -1206,7 +1206,7 @@
       <div class="field"><span>How urgent</span><div class="seg-pick" id="fUrg">
         <button type="button" data-u="normal" class="on">Normal</button><button type="button" data-u="high">High</button><button type="button" data-u="urgent">Urgent</button></div></div>
       <div class="field"><span>📐 Pictures of what to make (optional)</span>
-        <div class="nf-pics"><label class="btn sm line">＋ Add pictures<input type="file" accept="image/*" multiple id="fPics" hidden></label><div class="ph-grid" id="fPicsGrid"></div></div>
+        <div class="nf-pics"><label class="btn sm line">🖼 Add pictures <small>(gallery or camera)</small><input type="file" accept="image/*" multiple id="fPics" hidden></label><button type="button" class="btn sm line" id="fStock">📦 From stock</button><div class="ph-grid" id="fPicsGrid"></div></div>
         <small style="color:var(--muted)">The customer's sample, a sketch, the colour. Workers see these on their job card.</small></div>
       <div class="field"><span>Steps and who does them</span>${stepPeople(true)}</div>
       ${S.pay !== null ? `<label class="hold-pick"><input type="checkbox" id="fHold" checked> <span><b>Wait for the half payment</b><small>The workshop starts after you confirm the deposit. Untick if they paid already or don't need to.</small></span></label>` : ''}
@@ -1217,6 +1217,9 @@
     const drawPics = () => { pg.innerHTML = pics.map((f, i) => `<div class="ph"><img src="${URL.createObjectURL(f)}" alt=""><button type="button" class="ph-rm" data-fpx="${i}">✕</button></div>`).join(''); };
     s.querySelector('#fPics').onchange = e => { pics.push(...[...e.target.files].filter(f => /^image\//.test(f.type))); e.target.value = ''; drawPics(); };
     pg.addEventListener('click', e => { const b = e.target.closest('[data-fpx]'); if (!b) return; pics.splice(+b.dataset.fpx, 1); drawPics(); });
+    s.querySelector('#fStock').onclick = async () => { const r = await KStock.pick(db); if (!r) return;
+      const it = s.querySelector('#fItem'); if (!it.value.trim()) it.value = r.product.name;
+      if (r.file){ pics.push(r.file); drawPics(); } else toast('Could not get that photo. Add it from the gallery instead.'); };
     s.querySelector('#fUrg').addEventListener('click', e => { const b = e.target.closest('[data-u]'); if (!b) return; urg = b.dataset.u; s.querySelectorAll('#fUrg button').forEach(x => x.classList.toggle('on', x === b)); });
     s.querySelector('#fSave').onclick = async () => {
       const customer = s.querySelector('#fCust').value.trim(), item = s.querySelector('#fItem').value.trim();
@@ -1469,20 +1472,22 @@
       <h3>${isR ? 'Payment recorded' : 'Invoice ready'}</h3>
       <p class="sub">${isR ? `Receipt <b>${esc(doc.no)}</b> · ${KSH(doc.amount)}${extra && extra.balance > 0 ? ` · balance ${KSH(extra.balance)}` : ' · fully paid ✓'}` : `<b>${esc(doc.no)}</b> · total ${KSH(doc.total)}`}</p>
       ${isR && extra && extra.first ? '<p class="mo-note">✓ The workshop can start this order now.</p>' : ''}
+      ${isR ? `<label class="mo-with"><input type="checkbox" id="mrOrder" checked> Also send the order sheet <small>(what they ordered and where it is now, no money on it)</small></label>` : ''}
       <button class="btn mo-big" id="mrSend">📤 Send ${isR ? 'receipt' : 'invoice'} to ${esc(firstName(o.customer))}</button>
-      <p class="sub" style="font-size:12.5px">On the phone: pick WhatsApp, then ${esc(firstName(o.customer))}. The PDF goes with it.</p>
-      <button class="btn line" id="mrView">👁 Just look at the PDF</button>
+      <p class="sub" style="font-size:12.5px">On the phone: pick WhatsApp, then ${esc(firstName(o.customer))}. ${isR ? 'The PDFs go with it.' : 'The PDF goes with it.'}</p>
+      <div class="mo-views"><button class="btn line" id="mrView">👁 Look at the ${isR ? 'receipt' : 'PDF'}</button>${isR ? '<button class="btn line" id="mrViewO">👁 Look at the order sheet</button>' : ''}</div>
       <div class="actions"><button class="btn line" data-x>Done</button></div></div>`);
     let blob = null;
     const make = async () => blob || (blob = isR ? await receiptBlob(doc.id) : await invoiceBlob(doc.id));
     make().catch(() => {});   // start making it now so the Send tap is instant
     s.querySelector('#mrSend').onclick = async () => {
       const b = s.querySelector('#mrSend'); b.disabled = true;
-      try { const r = await (isR ? sendReceipt(doc.id, await make()) : sendInvoice(doc.id, await make())); if (r !== 'cancel'){ closeModal(); await load(); } }
+      try { const r = await (isR ? sendReceipt(doc.id, await make(), s.querySelector('#mrOrder').checked) : sendInvoice(doc.id, await make())); if (r !== 'cancel'){ closeModal(); await load(); } }
       catch(e){ toast(errMsg(e)); }
       b.disabled = false;
     };
     s.querySelector('#mrView').onclick = async () => { try { const u = URL.createObjectURL(await make()); window.open(u, '_blank'); } catch(e){ toast(errMsg(e)); } };
+    const vo = s.querySelector('#mrViewO'); if (vo) vo.onclick = async () => { try { const inv = S.money.inv.find(i => i.id === (S.money.pays.find(x => x.id === doc.id) || {}).invoice_id); const b = await orderBlob(o.id, inv); if (b) window.open(URL.createObjectURL(b), '_blank'); } catch(e){ toast(errMsg(e)); } };
   }
 
   async function invoiceBlob(id){
@@ -1504,12 +1509,24 @@
     if (r !== 'cancel'){ await db.rpc('kt_invoice_sent', { p_invoice: id }); toast(r === 'shared' ? 'Invoice sent ✓' : 'Invoice PDF saved. Attach it in WhatsApp.'); }
     return r;
   }
-  async function sendReceipt(id, blob){
+  // the order sheet: what the client ordered + progress, no money (for sending with a receipt)
+  async function orderBlob(orderId, inv){
+    const o = O(orderId); if (!o) return null;
+    const ts = S.tasks.filter(t => t.order === o.id).sort((a, b) => a.step - b.step);
+    const cur = ts.find(t => t.status !== 'done');
+    const steps = ts.map(t => ({ name: (ALL_STEPS.find(s => s.id === t.stage) || { name: t.stage }).name, state: t.status === 'done' ? 'done' : t === cur ? 'now' : 'todo' }));
+    const items = inv && inv.items ? inv.items.map(it => ({ desc: it.desc, qty: it.qty })) : null;
+    return KPDF.order({ biz: S.money ? S.money.biz : {}, o: Object.assign({}, o, { phone: (inv && inv.phone) || phoneOf(o) }), items, steps,
+      link: o.room ? roomLink(o) : null, deliveredOn: o.deliveredAt || null });
+  }
+  async function sendReceipt(id, blob, withOrder = true){
     const p = S.money.pays.find(x => x.id === id), inv = S.money.inv.find(i => i.id === p.invoice_id), o = inv && O(inv.order_id);
     blob = blob || await receiptBlob(id);
-    const msg = `Hi ${firstName(inv.customer)}, thank you! Here is your Kartech receipt ${p.no} for ${KSH(p.amount)} (${inv.order_ref || inv.no}).`;
-    const r = await KPDF.send(blob, `Kartech-${p.no}.pdf`, msg, inv.phone || (o && phoneOf(o)));
-    if (r !== 'cancel'){ await db.rpc('kt_receipt_sent', { p_payment: id }); toast(r === 'shared' ? 'Receipt sent ✓' : 'Receipt PDF saved. Attach it in WhatsApp.'); }
+    const files = [{ blob, name: `Kartech-${p.no}.pdf` }];
+    if (withOrder && o){ try { const ob = await orderBlob(o.id, inv); if (ob) files.push({ blob: ob, name: `Kartech-order-${o.ref}.pdf` }); } catch (e) {} }
+    const msg = `Hi ${firstName(inv.customer)}, thank you! Here is your Kartech receipt ${p.no} for ${KSH(p.amount)} (${inv.order_ref || inv.no})${files.length > 1 ? ', and a sheet showing your order and where it is now' : ''}.${o && o.room ? `\nFollow your order here: ${roomLink(o)}` : ''}`;
+    const r = await KPDF.send(files, null, msg, inv.phone || (o && phoneOf(o)));
+    if (r !== 'cancel'){ await db.rpc('kt_receipt_sent', { p_payment: id }); toast(r === 'shared' ? (files.length > 1 ? 'Receipt and order sheet sent ✓' : 'Receipt sent ✓') : (files.length > 1 ? 'Both PDFs saved. Attach them in WhatsApp.' : 'Receipt PDF saved. Attach it in WhatsApp.')); }
     return r;
   }
 
@@ -1572,10 +1589,10 @@
         <div class="room-msgs" id="roomMsgs"><span class="ph-empty">Loading messages…</span></div>
         <form class="room-reply" id="roomReply"><input id="roomIn" placeholder="Reply to the customer…" autocomplete="off"><button class="btn sm">Send</button></form></div>` : ''}
       <div class="ph-box ref"><div class="ph-head"><b>📐 What to make</b><small>Customer's sample, a sketch, the colour. Workers see these on their job.</small>
-        ${o.delivered ? '' : '<label class="btn sm ph-add">＋ Add picture<input type="file" accept="image/*" multiple id="phInRef" hidden></label>'}</div>
+        ${o.delivered ? '' : '<label class="btn sm ph-add">🖼 Add from gallery<input type="file" accept="image/*" multiple id="phInRef" hidden></label><button type="button" class="btn sm line ph-add" data-refstock>📦 From stock</button><label class="btn sm line ph-add">📷 Take photo<input type="file" accept="image/*" capture="environment" multiple data-phinref hidden></label>'}</div>
         <div class="ph-grid" id="phRef"><span class="ph-empty">Loading…</span></div></div>
       <div class="ph-box"><div class="ph-head"><b>📷 Finished work</b><small>${p.finished && !o.delivered ? 'Take a photo before it leaves. ' : ''}Only you see these.</small>
-        <label class="btn sm line ph-add">＋ Add photo<input type="file" accept="image/*" capture="environment" id="phIn" hidden></label></div>
+        <label class="btn sm line ph-add">📷 Take photo<input type="file" accept="image/*" capture="environment" data-phin hidden></label><label class="btn sm line ph-add">🖼 From gallery<input type="file" accept="image/*" multiple data-phin hidden></label></div>
         <div class="ph-grid" id="phGrid"><span class="ph-empty">Loading…</span></div></div>
       <p class="section-title">Steps</p>
       <div class="steps">${ts.map(t => { const [k, l] = lbl(t); const w = t.worker && W(t.worker); const plan = t.planned.map(id => W(id)?.name).filter(Boolean).join(' & '); return `<div class="step"><div style="flex:1"><b>${stageName(t.stage)}</b>${t.withPrev ? ' <span class="tog-tag">⇉ same time as above</span>' : ''}<div style="color:var(--muted);font-size:13px">${w ? esc(taskNames(t)) + (x => x ? ` · ${esc(x)} joins when free` : '')(t.planned.filter(id => !S.workers.some(v => v.id === id && v.task === t.id)).map(id => W(id)?.name).filter(Boolean).join(' & ')) : plan ? '👤 For ' + esc(plan) : 'Whoever is free'}${t.problem ? ` · ⚠ ${esc(t.problem.reason)}` : ''}</div></div><span class="pill p-${k}">${l}</span>${t.problem ? `<button class="btn sm" data-solve="${t.id}">Solved</button>` : ''}${o.delivered || t.status === 'done' ? '' : `<button class="btn sm line" data-stepsheet="${t.id}">👤 Choose</button>`}</div>`; }).join('')}</div>
@@ -1592,8 +1609,9 @@
       $('#roomReply').onsubmit = async e => { e.preventDefault(); const t = $('#roomIn').value.trim(); if (!t) return;
         const { error } = await db.rpc('ws_room_reply', { p_order: o.id, p_text: t }); if (error) return toast(/ws_room_reply/.test(errMsg(error)) ? 'Run update-16-order-room.sql in Supabase first.' : errMsg(error));
         $('#roomIn').value = ''; toast('Sent. The customer sees it in their Order Room.'); loadRoomMsgs(o.id); }; }
-    const phIn = $('#phIn'); if (phIn) phIn.onchange = () => { const f = phIn.files && phIn.files[0]; if (f) addPhoto(o, f, 'done'); phIn.value = ''; };
-    const phR = $('#phInRef'); if (phR) phR.onchange = async () => { const fs = [...(phR.files || [])]; phR.value = ''; for (const f of fs) await addPhoto(o, f, 'ref'); };
+    document.querySelectorAll('[data-phin]').forEach(phIn => { phIn.onchange = async () => { const fs = [...(phIn.files || [])]; phIn.value = ''; for (const f of fs) await addPhoto(o, f, 'done', fs.length > 1); if (fs.length > 1){ toast(`${fs.length} photos added to ${o.ref}`); loadPhotos(o.id); } }; });
+    const rs = document.querySelector('[data-refstock]'); if (rs) rs.onclick = async () => { const r = await KStock.pick(db); if (!r) return; if (!r.file) return toast('Could not get that photo. Add it from the gallery instead.'); await addPhoto(o, r.file, 'ref'); };
+    document.querySelectorAll('#phInRef, [data-phinref]').forEach(phR => { phR.onchange = async () => { const fs = [...(phR.files || [])]; phR.value = ''; for (const f of fs) await addPhoto(o, f, 'ref'); }; });
     const u = $('#mkUrgent');
     if (u) u.onclick = async () => { u.disabled = true; closeModal(); await act('ws_make_urgent', { p_order: o.id }, `${o.ref} is now urgent`); };
   }

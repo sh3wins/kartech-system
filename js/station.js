@@ -206,12 +206,13 @@
         <label class="no-f anim" style="--i:2"><span>Exact details: size, colour, material</span><textarea class="fm-in" data-nf="notes" rows="3" placeholder="e.g. 75 cm high, black frame, red seat">${esc(n.notes)}</textarea></label>
         <div class="st-group anim" style="--i:3"><h4>📐 Pictures of what to make</h4>
           <div class="no-pics">${n.files.map((f, i) => `<div class="ph"><img src="${f._u}" alt=""><button class="ph-rm" data-npx="${i}">✕</button></div>`).join('')}
-            <label class="fm-chip no-add">📷 Add picture<input type="file" accept="image/*" capture="environment" multiple id="noPics" hidden></label></div></div>
+            <label class="fm-chip no-add">📷 Take photo<input type="file" accept="image/*" capture="environment" multiple data-nopics hidden></label><label class="fm-chip no-add">🖼 From gallery<input type="file" accept="image/*" multiple data-nopics hidden></label><button type="button" class="fm-chip no-add" id="noStock">📦 From stock</button></div></div>
         <div class="st-group anim" style="--i:4"><h4>Steps it needs · tap to remove</h4><div class="fm-chips">${STAGES.map(chip).join('')}</div></div>
         <p class="err" id="noErr">${esc(n.err || '')}</p>
         <button class="giant go anim" id="noSave" style="--i:5">✓ Add order</button>`;
       v.querySelectorAll('[data-nf]').forEach(el => el.addEventListener('input', () => { fm.no[el.dataset.nf] = el.value; fmIdle(); }));
-      const pi = $('#noPics'); if (pi) pi.onchange = () => { [...pi.files].filter(f => /^image\//.test(f.type)).forEach(f => { f._u = URL.createObjectURL(f); fm.no.files.push(f); }); renderForeman(); };
+      const nst = $('#noStock'); if (nst) nst.onclick = async () => { const r = await KStock.pick(db); if (!r || !fm.no) return; if (!fm.no.item) fm.no.item = r.product.name; if (r.file){ r.file._u = URL.createObjectURL(r.file); fm.no.files.push(r.file); } renderForeman(); };
+      document.querySelectorAll('[data-nopics]').forEach(pi => { pi.onchange = () => { [...pi.files].filter(f => /^image\//.test(f.type)).forEach(f => { f._u = URL.createObjectURL(f); fm.no.files.push(f); }); renderForeman(); }; });
       return;
     }
     if (fm.view === 'wedit'){

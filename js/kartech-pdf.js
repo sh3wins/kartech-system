@@ -154,19 +154,92 @@ window.KPDF = (() => {
     return doc.output('blob');
   }
 
-  // phone: Share sheet (the PDF goes into WhatsApp) · computer: download + open WhatsApp
+  /* ORDER SHEET: what the client ordered and where it is. No money on it (that's on the receipt). */
+  async function order({ biz, o, items, steps, link, deliveredOn }){
+    const { jsPDF } = await load(); const doc = new jsPDF({ unit: 'mm', format: 'a5' });
+    const W = 148;
+    doc.setProperties({ title: 'Kartech order ' + o.ref, author: 'Kartech Engineering' });
+    let y = head(doc, biz, 'ORDER', o.ref, 'Ordered ' + day(o.createdAt));
+    // who and when
+    label(doc, 'FOR', 12, y); label(doc, deliveredOn ? 'DELIVERED' : 'READY BY', 78, y);
+    doc.setTextColor(...C.ink); doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+    const name = String(o.customer || '').replace(/(\+?254|0)[17]\d{2}\s?\d{3}\s?\d{3}/, '').trim();
+    doc.text(doc.splitTextToSize(name, 60)[0], 12, y + 5.5);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); if (o.phone) doc.text(phoneNice(o.phone), 12, y + 10);
+    doc.setFont('helvetica', 'bold'); doc.text(deliveredOn ? day(deliveredOn) : day(o.deadline), 78, y + 5.5);
+    doc.setFont('helvetica', 'normal');
+    if (o.delPlace) doc.text(doc.splitTextToSize('Delivery: ' + o.delPlace, 58)[0], 78, y + 10);
+    y += 18;
+    // what we're making
+    label(doc, "WHAT WE'RE MAKING", 12, y); y += 2.5;
+    doc.setDrawColor(...C.line); doc.setLineWidth(0.3); doc.line(12, y, W - 12, y); y += 5.5;
+    const list = items && items.length ? items : [{ desc: o.item, qty: o.qty }];
+    doc.setFontSize(9.5); doc.setTextColor(...C.ink);
+    for (const it of list){
+      const d = doc.splitTextToSize(String(it.desc), 96);
+      doc.setFont('helvetica', 'bold'); doc.text(num(it.qty) + ' ×', 12, y);
+      doc.setFont('helvetica', 'normal'); doc.text(d, 24, y);
+      y += d.length * 4.2 + 2.2;
+    }
+    if (o.notes){
+      const n = doc.splitTextToSize(String(o.notes).replace(/(\+?254|0)[17]\d{2}\s?\d{3}\s?\d{3}/g, '').trim(), 118);
+      if (n.join('').trim()){ y += 1; doc.setFontSize(8.5); doc.setTextColor(...C.muted); doc.text('Details: ', 12, y);
+        doc.setTextColor(...C.ink); doc.text(n.slice(0, 5), 24, y); y += Math.min(n.length, 5) * 3.8 + 2; }
+    }
+    // progress
+    if (steps && steps.length){
+      y += 3; label(doc, 'PROGRESS', 12, y); y += 2.5;
+      doc.setDrawColor(...C.line); doc.line(12, y, W - 12, y); y += 6;
+      const done = steps.filter(s => s.state === 'done').length;
+      const colW = 124 / Math.min(steps.length, 5), rows = Math.ceil(steps.length / 5);
+      steps.forEach((s, i) => {
+        const cx = 12 + (i % 5) * colW, cy = y + Math.floor(i / 5) * 11;
+        if (s.state === 'done'){ doc.setFillColor(...C.green); doc.circle(cx + 2, cy - 1.2, 1.9, 'F'); doc.setDrawColor(...C.white); doc.setLineWidth(0.45); doc.lines([[0.7, 0.8], [1.5, -1.7]], cx + 1.1, cy - 1.2); }
+        else if (s.state === 'now'){ doc.setFillColor(...C.gold); doc.circle(cx + 2, cy - 1.2, 1.9, 'F'); }
+        else { doc.setDrawColor(...C.line); doc.setLineWidth(0.5); doc.circle(cx + 2, cy - 1.2, 1.9, 'S'); }
+        doc.setFont('helvetica', s.state === 'now' ? 'bold' : 'normal'); doc.setFontSize(7.6); doc.setTextColor(...(s.state === 'todo' ? C.muted : C.ink));
+        doc.text(doc.splitTextToSize(s.name, colW - 6).slice(0, 2), cx + 5, cy - 0.4);
+      });
+      y += rows * 11 + 1;
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(...C.ink);
+      const now = steps.find(s => s.state === 'now');
+      doc.text(deliveredOn ? 'Delivered. Thank you for choosing Kartech.' : done === steps.length ? 'All done. Your order is ready for delivery.' : now ? 'Now: ' + now.name + ' (' + done + ' of ' + steps.length + ' steps done)' : 'Waiting to start (' + done + ' of ' + steps.length + ' steps done)', 12, y);
+      y += 6;
+    }
+    // follow it live
+    if (link && y < 150){
+      doc.setFillColor(...C.soft); doc.roundedRect(12, y, 124, 26, 3, 3, 'F');
+      await qr(doc, link, 15, y + 3, 20);
+      label(doc, 'FOLLOW YOUR ORDER', 40, y + 7);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(...C.ink);
+      doc.text('See photos, progress and messages from the workshop.', 40, y + 12.5);
+      // a button you can tap on the same phone (the QR is for a printed copy or a second phone)
+      doc.setFillColor(...C.forest); doc.roundedRect(40, y + 15.5, 52, 7.5, 2, 2, 'F');
+      doc.setTextColor(...C.white); doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); doc.text('Tap to open your order', 66, y + 20.4, { align: 'center' });
+      doc.link(40, y + 15.5, 52, 7.5, { url: link });
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(...C.muted); doc.text('or scan the code', 95, y + 20.2);
+    }
+    await foot(doc, ['Kartech Engineering · made in our own workshop in Nairobi.', 'This sheet shows your order. Payments are on your receipt.', 'Questions? Reply on WhatsApp or call us.'], null);
+    return doc.output('blob');
+  }
+
+  // phone: Share sheet (the PDFs go into WhatsApp) · computer: download + open WhatsApp
+  // blob can be one PDF, or a list: [{ blob, name }, …] to send several at once
   async function send(blob, fileName, message, phone){
-    let file = null; try { file = new File([blob], fileName, { type: 'application/pdf' }); } catch (e) {}
-    if (file && navigator.canShare && navigator.canShare({ files: [file] })){
-      try { await navigator.share({ files: [file], text: message }); return 'shared'; }
+    const list = Array.isArray(blob) ? blob : [{ blob, name: fileName }];
+    let files = null; try { files = list.map(x => new File([x.blob], x.name, { type: 'application/pdf' })); } catch (e) {}
+    if (files && navigator.canShare && navigator.canShare({ files })){
+      try { await navigator.share({ files, text: message }); return 'shared'; }
       catch (e){ if (e && e.name === 'AbortError') return 'cancel'; }
     }
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fileName;
-    document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+    list.forEach((x, i) => setTimeout(() => {
+      const a = document.createElement('a'); a.href = URL.createObjectURL(x.blob); a.download = x.name;
+      document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+    }, i * 400));
     const ph = String(phone || '').replace(/\D/g, '').replace(/^0/, '254');
-    if (/^254\d{9}$/.test(ph)) window.open('https://wa.me/' + ph + '?text=' + encodeURIComponent(message + '\n(PDF attached)'), '_blank', 'noopener');
+    if (/^254\d{9}$/.test(ph)) window.open('https://wa.me/' + ph + '?text=' + encodeURIComponent(message + (list.length > 1 ? '\n(' + list.length + ' PDFs attached)' : '\n(PDF attached)')), '_blank', 'noopener');
     return 'saved';
   }
 
-  return { load, invoice, receipt, send, money };
+  return { load, invoice, receipt, order, send, money };
 })();
