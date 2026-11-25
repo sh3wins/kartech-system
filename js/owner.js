@@ -905,7 +905,7 @@
       const o = O(odl.dataset.odel); if (!o) return;
       if (!odl.classList.contains('sure')){
         document.querySelectorAll('.o-del.sure').forEach(x => { x.classList.remove('sure'); x.textContent = '🗑'; });
-        odl.classList.add('sure'); odl.textContent = 'Delete?'; toast(`Tap "Delete?" again to move ${o.ref} to the 🗑 Bin. You can bring it back for 30 days.`);
+        odl.classList.add('sure'); odl.textContent = 'Delete?'; const hasInv = S.money && S.money.inv.some(i => i.order_id === o.id); toast(`Tap "Delete?" again to move ${o.ref} to the 🗑 Bin. You can bring it back for 30 days.${hasInv ? ' It has an invoice: that stays in Finance.' : ''}`);
         setTimeout(() => { if (document.body.contains(odl) && !odl.disabled){ odl.classList.remove('sure'); odl.textContent = '🗑'; } }, 4000); return; }
       odl.disabled = true; odl.textContent = '…';
       const { error } = await db.rpc('ws_delete_order', { p_order: o.id });
@@ -1549,7 +1549,7 @@
     const rows = S.money.inv.map(i => ({ i, paid: paidOf(i), bal: Number(i.total) - paidOf(i), o: O(i.order_id) }));
     const owed = rows.reduce((a, r) => a + Math.max(0, r.bal), 0);
     const open = rows.filter(r => r.bal > 0), done = rows.filter(r => r.bal <= 0);
-    const row = r => `<button class="kf-row" ${r.o ? `data-open="${r.o.id}"` : ''}><span><b>${esc(r.i.order_ref || '—')} · ${esc(firstName(r.i.customer))}</b><small>${esc(r.i.no)} · ${KSH(r.i.total)}${r.i.sent_at ? '' : ' · not sent yet'}</small></span><span class="kf-status ${r.bal > 0 ? '' : 'ok'}">${r.bal > 0 ? KSH(r.bal) + ' due' : 'Paid ✓'}</span><span>→</span></button>`;
+    const row = r => `<button class="kf-row" ${r.o ? `data-open="${r.o.id}"` : `data-noorder="${esc(r.i.order_ref || r.i.no)}"`}><span><b>${esc(r.i.order_ref || '—')} · ${esc(firstName(r.i.customer))}</b><small>${esc(r.i.no)} · ${KSH(r.i.total)}${r.i.sent_at ? '' : ' · not sent yet'}</small></span><span class="kf-status ${r.bal > 0 ? '' : 'ok'}">${r.bal > 0 ? KSH(r.bal) + ' due' : 'Paid ✓'}</span><span>→</span></button>`;
     const recent = S.money.pays.slice(-8).reverse();
     return `<div class="kf-wrap"><div class="kf-head"><div><span class="kf-eyebrow">OWNER ONLY · THE MANAGER NEVER SEES THIS</span><h1>Finance</h1><p>Money received, money owed, invoices and receipts.</p></div></div>
       <div class="kf-grid"><div class="kf-stat good"><small>Received today</small><strong class="kf-money">${KSH(today)}</strong></div>
@@ -1565,6 +1565,11 @@
   // buttons
   document.addEventListener('click', async e => {
     const mi = e.target.closest('[data-minv]'); if (mi){ const o = O(mi.dataset.minv); if (o) invoiceModal(o); return; }
+    const nob = e.target.closest('[data-noorder]'); if (nob){ const ref = nob.dataset.noorder;
+      openModal(`<h3>${esc(ref)} isn't in the orders list</h3><p class="sub">This order was deleted, or it was delivered more than 30 days ago. Its invoice and receipts are still kept here for the record.</p>
+        <p class="sub">If it was deleted by mistake, open the 🗑 Bin and tap <b>Bring back</b>. The order and its invoice come back together.</p>
+        <div class="actions"><button class="btn line" data-x>Close</button><button class="btn" id="nobBin">🗑 Open the Bin</button></div>`);
+      document.getElementById('nobBin').onclick = () => binModal(); return; }
     const mp = e.target.closest('[data-mpay]'); if (mp){ const o = O(mp.dataset.mpay); if (o) payModal(o, mp.dataset.mref || ''); return; }
     const si = e.target.closest('[data-msendinv]'); if (si && !si.disabled){ si.disabled = true; try { await sendInvoice(si.dataset.msendinv); await load(); } catch(er){ toast(errMsg(er)); } si.disabled = false; return; }
     const sr = e.target.closest('[data-msendr]'); if (sr && !sr.disabled){ sr.disabled = true; try { await sendReceipt(sr.dataset.msendr); await load(); } catch(er){ toast(errMsg(er)); } sr.disabled = false; return; }
