@@ -8,8 +8,8 @@
   const v = $('#stView');
   let tools = null, workers = [], pinFor = null, pin = '', token = null, me = null, job = null, mats = [];
   let probOpen = false, probReason = null, idleT = null, idleLeft = 0, pollT = null, sending = false;
-  let unread = {}, msgs = null, msgOpen = false, draft = '';
-  let fabs = null, jobFab = null;   // fabrics (update-29)   // messages from the owner (update-28)
+  let unread = {}, msgs = null, msgOpen = false, draft = '';   // messages from the owner (update-28)
+  let fabs = null, jobFab = null;   // fabrics (update-29, 30)
 
   if (!db){ v.innerHTML = '<h1>Not set up yet</h1><p class="lead">Add the Supabase keys in js/config.js.</p>'; return; }
 
@@ -207,7 +207,12 @@
           <label class="no-f"><span>Ready by</span><input class="fm-in" type="date" data-nf="deadline" value="${esc(n.deadline)}"></label>
           <div class="no-f"><span>How urgent</span><div class="fm-chips">${['normal','urgent'].map(u => `<button class="fm-chip ${n.urgency === u ? 'on' : ''}" data-nurg="${u}">${u === 'normal' ? 'Normal' : '⚡ Urgent'}</button>`).join('')}</div></div>
         </div>
-        ${fabs && fabs.length ? `<div class="no-f anim" style="--i:2"><span>🧵 Fabric &amp; colour</span><div class="fm-chips fab-chips"><button class="fm-chip ${n.fabric ? '' : 'on'}" data-nfab="">No fabric</button>${fabs.map(f => `<button class="fm-chip ${n.fabric === f.id ? 'on' : ''}" data-nfab="${f.id}"><i class="fab-sw" style="background:${esc(f.hex)}"></i>${esc(f.kind)} · ${esc(f.colour)}</button>`).join('')}</div></div>` : ''}
+        ${fabs && fabs.length ? `<div class="no-f anim" style="--i:2"><span>🧵 Fabric &amp; colour</span><div class="fm-chips fab-chips"><button class="fm-chip ${n.fabric ? '' : 'on'}" data-nfab="">No fabric</button>${fabs.map(f => `<button class="fm-chip ${n.fabric === f.id ? 'on' : ''}" data-nfab="${f.id}"><i class="fab-sw ${f.photo ? 'ph' : ''}" style="background:${esc(f.hex)}${f.photo ? ` url('${esc(f.photo)}') center/cover` : ''}"></i>${esc(f.kind)} · ${esc(f.colour)}</button>`).join('')}</div></div>` : ''}
+        ${(n.extra || []).map((x, i) => `<div class="no-x anim" style="--i:2"><div class="no-x-h"><b>Item ${i + 2}</b><button class="no-x-rm" data-nxrm="${i}">✕ Remove</button></div>
+          <div class="no-grid"><label class="no-f"><span>What</span><input class="fm-in" data-nx="${i}" data-nxk="item" value="${esc(x.item)}" placeholder="e.g. Bar stools" autocomplete="off"></label>
+          <label class="no-f"><span>How many</span><input class="fm-in" data-nx="${i}" data-nxk="qty" value="${esc(x.qty)}" inputmode="numeric" placeholder="1"></label></div>
+          ${fabs && fabs.length ? `<div class="no-f"><span>🧵 Fabric &amp; colour</span><div class="fm-chips fab-chips"><button class="fm-chip ${x.fabric ? '' : 'on'}" data-nxfab="${i}:">No fabric</button>${fabs.map(f => `<button class="fm-chip ${x.fabric === f.id ? 'on' : ''}" data-nxfab="${i}:${f.id}"><i class="fab-sw ${f.photo ? 'ph' : ''}" style="background:${esc(f.hex)}${f.photo ? ` url('${esc(f.photo)}') center/cover` : ''}"></i>${esc(f.kind)} · ${esc(f.colour)}</button>`).join('')}</div></div>` : ''}</div>`).join('')}
+        <button class="fm-chip no-xadd anim" style="--i:2" data-nxadd="1">➕ Add another item <small>(same order, e.g. a different colour)</small></button>
         <label class="no-f anim" style="--i:2"><span>Exact details: size, colour, material</span><textarea class="fm-in" data-nf="notes" rows="3" placeholder="e.g. 75 cm high, black frame, red seat">${esc(n.notes)}</textarea></label>
         <div class="st-group anim" style="--i:3"><h4>📐 Pictures of what to make</h4>
           <div class="no-pics">${n.files.map((f, i) => `<div class="ph"><img src="${f._u}" alt=""><button class="ph-rm" data-npx="${i}">✕</button></div>`).join('')}
@@ -216,6 +221,7 @@
         <p class="err" id="noErr">${esc(n.err || '')}</p>
         <button class="giant go anim" id="noSave" style="--i:5">✓ Add order</button>`;
       v.querySelectorAll('[data-nf]').forEach(el => el.addEventListener('input', () => { fm.no[el.dataset.nf] = el.value; fmIdle(); }));
+      v.querySelectorAll('[data-nx]').forEach(el => el.addEventListener('input', () => { fm.no.extra[+el.dataset.nx][el.dataset.nxk] = el.value; fmIdle(); }));
       const nst = $('#noStock'); if (nst) nst.onclick = async () => { const r = await KStock.pick(db); if (!r || !fm.no) return; if (!fm.no.item) fm.no.item = r.product.name; if (r.file){ r.file._u = URL.createObjectURL(r.file); fm.no.files.push(r.file); } renderForeman(); };
       document.querySelectorAll('[data-nopics]').forEach(pi => { pi.onchange = () => { [...pi.files].filter(f => /^image\//.test(f.type)).forEach(f => { f._u = URL.createObjectURL(f); fm.no.files.push(f); }); renderForeman(); }; });
       return;
@@ -261,29 +267,41 @@
     if (b.id === 'fmBack' && fm.view === 'qr'){ const back = (fm.qr && fm.qr.back) || 'home'; fm.qr = null; fm.view = back; return renderForeman(); }
     if (b.id === 'fmBack'){ fm.view = 'home'; fm.pick = null; await fmLoad(); return renderForeman(); }
     if (b.id === 'fmNewOrder'){ const d = new Date(); d.setDate(d.getDate() + 7);
-      fm.no = { customer:'', phone:'', item:'', qty:'1', deadline: d.toLocaleDateString('en-CA'), urgency:'normal', notes:'', files:[], stages: STAGES.map(x => x.id), err:'', fabric:null }; fm.view = 'neworder';
-      if (fabs === null){ db.from('kt_fabrics').select('id,kind,colour,hex').eq('active', true).order('kind').order('colour').then(r => { fabs = r.error ? false : r.data; if (fm && fm.view === 'neworder') renderForeman(); }); }
+      fm.no = { customer:'', phone:'', item:'', qty:'1', deadline: d.toLocaleDateString('en-CA'), urgency:'normal', notes:'', files:[], stages: STAGES.map(x => x.id), err:'', fabric:null, extra:[] }; fm.view = 'neworder';
+      if (fabs === null){ db.from('kt_fabrics').select('*').eq('active', true).order('kind').order('colour').then(r => { fabs = r.error ? false : r.data; if (fm && fm.view === 'neworder') renderForeman(); }); }
       return renderForeman(); }
     if (b.dataset.nst){ const x = b.dataset.nst, st = fm.no.stages; fm.no.stages = st.includes(x) ? st.filter(y => y !== x) : STAGES.map(z => z.id).filter(z => st.includes(z) || z === x); return renderForeman(); }
     if (b.dataset.nurg){ fm.no.urgency = b.dataset.nurg; return renderForeman(); }
     if (b.dataset.nfab !== undefined){ fm.no.fabric = b.dataset.nfab || null; return renderForeman(); }
+    if (b.dataset.nxadd){ fm.no.extra.push({ item:'', qty:'1', fabric:null }); renderForeman(); const ins = document.querySelectorAll('[data-nxk="item"]'); if (ins.length) ins[ins.length - 1].focus(); return; }
+    if (b.dataset.nxrm !== undefined){ fm.no.extra.splice(+b.dataset.nxrm, 1); return renderForeman(); }
+    if (b.dataset.nxfab !== undefined){ const [i, id] = b.dataset.nxfab.split(':'); fm.no.extra[+i].fabric = id || null; return renderForeman(); }
     if (b.dataset.npx){ fm.no.files.splice(+b.dataset.npx, 1); return renderForeman(); }
     if (b.id === 'noSave'){ const n = fm.no;
       if (!n.customer.trim() || !n.item.trim()){ n.err = 'Write the customer and what they want.'; return renderForeman(); }
       if (!n.stages.length){ n.err = 'Keep at least one step.'; return renderForeman(); }
+      const extra = (n.extra || []).filter(x => x.item.trim()).map(x => ({ item: x.item.trim(), qty: parseInt(x.qty, 10) || 0, fabric_id: x.fabric }));
+      const badX = extra.find(x => x.qty < 1); if (badX){ n.err = `How many ${badX.item}?`; return renderForeman(); }
       b.disabled = true; b.textContent = 'Adding…';
       const notes = [n.notes.trim(), n.phone.trim() ? 'Phone: ' + n.phone.trim() : ''].filter(Boolean).join(' · ');
       const sv = { qty: n.qty, item: n.item.trim(), customer: n.customer.trim(), notes };
       const { data, error } = await db.rpc('ws_foreman_create_order', { p_pin: fm.pin, p: { customer: n.customer.trim(), item: n.item.trim(), qty: Math.max(1, parseInt(n.qty, 10) || 1), deadline: n.deadline || null, urgency: n.urgency, notes, stages: n.stages } });
       if (error){ n.err = /ws_foreman_create_order/.test(errMsg(error)) ? 'The owner needs to run update-15-sales.sql in Supabase first.' : errMsg(error); return renderForeman(); }
-      let bad = 0;
-      if (n.fabric) await db.rpc('ws_foreman_set_fabric', { p_pin: fm.pin, p_order: data.id, p_fabric: n.fabric });
+      let bad = 0, linesBad = false;
+      if (extra.length){ const r = await db.rpc('ws_foreman_set_lines', { p_pin: fm.pin, p_order: data.id, p_lines: [{ item: n.item.trim(), qty: Math.max(1, parseInt(n.qty, 10) || 1), fabric_id: n.fabric }].concat(extra) }); if (r.error) linesBad = true; }
+      else if (n.fabric) await db.rpc('ws_foreman_set_fabric', { p_pin: fm.pin, p_order: data.id, p_fabric: n.fabric });
       for (const f of n.files){ b.textContent = 'Adding pictures…';
-        try { if (!db.storage) throw 0; const blob = await shrinkPic(f), path = `${data.id}/${Date.now()}.jpg`;
-          const up = await db.storage.from('kartech-photos').upload(path, blob, { contentType:'image/jpeg', upsert:false }); if (up.error) throw up.error;
-          const r = await db.rpc('ws_foreman_add_photo', { p_pin: fm.pin, p_order: data.id, p_path: path }); if (r.error) throw r.error;
+        try { if (!db.storage) throw 0; const blob = await shrinkPic(f);
+          // design pictures go where the client can see them too (update-32); fall back to the private store
+          const dp = `design/${data.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+          const tu = await db.storage.from('room-files').upload(dp, blob, { contentType:'image/jpeg', upsert:false });
+          let r = tu.error ? { error: tu.error } : await db.rpc('ws_foreman_add_photo', { p_pin: fm.pin, p_order: data.id, p_path: dp });
+          if (r.error){ if (!tu.error) await db.storage.from('room-files').remove([dp]).catch(() => {});
+            const path = `${data.id}/${Date.now()}.jpg`;
+            const up = await db.storage.from('kartech-photos').upload(path, blob, { contentType:'image/jpeg', upsert:false }); if (up.error) throw up.error;
+            r = await db.rpc('ws_foreman_add_photo', { p_pin: fm.pin, p_order: data.id, p_path: path }); if (r.error) throw r.error; }
         } catch(e){ bad++; } }
-      toast(`${data.ref} added ✓ The owner has been told.${bad ? ` ${bad} picture${bad > 1 ? 's' : ''} did not upload.` : ''}`);
+      toast(`${data.ref} added ✓ The owner has been told.${bad ? ` ${bad} picture${bad > 1 ? 's' : ''} did not upload.` : ''}${linesBad ? ' Only the first item was saved: tell the owner the others.' : ''}`);
       const rc = await db.rpc('ws_foreman_room_code', { p_pin: fm.pin, p_order: data.id });
       fm.no = null; await fmLoad();
       if (!rc.error && rc.data) return fmShowQR({ ref: data.ref, qty: Math.max(1, parseInt(sv.qty, 10) || 1), item: sv.item, customer: sv.customer, notes: sv.notes, room: rc.data }, 'home');
@@ -434,7 +452,8 @@
         ${t.approved ? `<p class="approved">✓ <b>Customer approved this design</b> · ${new Date(t.approved).toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short' })}</p>` : ''}
         ${t.deposit ? `<p class="approved">✓ <b>Deposit confirmed</b> · you can start</p>` : ''}
         <div class="tags"><span class="tag u-${o.urgency}">${o.urgency === 'normal' ? 'Normal' : '● ' + URG_NAME[o.urgency] + ' priority'}</span><span class="tag due">◷ Due ${fmtDay(new Date(o.deadline + 'T17:00'))}</span><span class="tag">Then: ${job.after ? stageName(job.after) : 'Delivery'}</span></div>
-        ${jobFab && jobFab.name ? `<div class="note fabn">🧵 Fabric: <i class="fab-sw big" style="background:${esc(jobFab.hex || '#888')}"></i><b>${esc(jobFab.name)}</b></div>` : ''}
+        ${jobFab && jobFab.lines ? `<div class="note jl"><b class="jl-t">${jobFab.lines.length} items in this order</b>${jobFab.lines.map(l => `<div class="jl-r"><span class="jl-q">${l.qty} ×</span><span class="jl-i">${esc(l.item)}</span>${l.fabric ? `<span class="jl-f">${l.photo ? `<img class="jl-ph" src="${esc(l.photo)}" alt="">` : `<i class="fab-sw" style="background:${esc(l.hex || '#888')}"></i>`}${esc(l.fabric)}</span>` : '<span class="jl-f muted">No fabric</span>'}</div>`).join('')}</div>` : ''}
+        ${jobFab && jobFab.name ? `<div class="note fabn">${jobFab.photo ? `<img class="fab-ph" src="${esc(jobFab.photo)}" alt="">` : `<i class="fab-sw big" style="background:${esc(jobFab.hex || '#888')}"></i>`}<span>🧵 Fabric<br><b>${esc(jobFab.name)}</b></span></div>` : ''}
         ${o.notes ? `<div class="note">📝 ${esc(o.notes)}</div>` : ''}
         ${pics.length ? `<div class="pics"><p class="k">📐 What to make · tap to see big</p><div class="pics-row">${pics.map((u, i) => `<button class="pic" data-pic="${i}"><img src="${esc(u)}" alt="Picture ${i + 1}"></button>`).join('')}</div></div>` : ''}
         ${mats.length ? `<div class="note mats-given"><b>📦 Materials given to you for this job</b><br>${mats.map(m => `${+(+m.qty).toFixed(2)} ${esc(m.unit)} ${esc(m.name)}`).join(' · ')}<br><small>Bring anything left over back to the store.</small></div>` : ''}
@@ -511,6 +530,8 @@
     if (error || !data || !data.length || !db.storage){ pics = []; picsFor = key; picsAt = Date.now(); return; }
     const out = [];
     for (const bk of [...new Set(data.map(x => x.b))]){ const list = data.filter(x => x.b === bk);
+      // room-files is a public store with secret addresses: no signing needed (the workshop computer may not sign there)
+      if (bk === 'room-files'){ list.forEach(x => out.push(db.storage.from(bk).getPublicUrl(x.p).data.publicUrl)); continue; }
       const r = await db.storage.from(bk).createSignedUrls(list.map(x => x.p), 3600); (r.data || []).forEach(u => u && u.signedUrl && out.push(u.signedUrl)); }
     pics = out; picsFor = key; picsAt = Date.now();
   }

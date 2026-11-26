@@ -93,6 +93,27 @@
   .code-in{width:100%;height:58px;border:1.5px solid var(--line);border-radius:16px;padding:0 16px;font-size:22px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;background:#fff;font-family:ui-monospace,Menlo,Consolas,monospace}
   .code-in:focus{outline:none;border-color:var(--leaf)}
   .hidden{display:none!important}
+  .ord{display:flex;flex-direction:column;gap:12px}
+  .ord-h{margin:0}
+  .ord-pics{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;margin:0 -4px;padding:0 4px 2px}
+  .ord-pic{flex:0 0 72%;aspect-ratio:4/3;border:0;padding:0;border-radius:14px;overflow:hidden;background:#DCD6C8;scroll-snap-align:start}
+  .ord-pics.one .ord-pic{flex-basis:100%}
+  .ord-pic img{width:100%;height:100%;object-fit:cover;display:block}
+  .ord-lines{list-style:none;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .ord-lines li{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:11px 13px;border-bottom:1px solid var(--line)}
+  .ord-lines li:last-child{border-bottom:0}
+  .ord-q{font-family:'Archivo',sans-serif;font-weight:800;font-size:16px;font-variant-numeric:tabular-nums}
+  .ord-i{display:flex;flex-direction:column;gap:1px;min-width:0}
+  .ord-i b{font-size:15.5px}
+  .ord-i small{color:var(--muted);font-size:13px}
+  .sw{width:34px;height:34px;border-radius:10px;border:1px solid rgba(0,0,0,.12);display:block}
+  .sw-ph{width:44px;height:44px;padding:0;overflow:hidden;background:#eee}
+  .sw-ph img{width:100%;height:100%;object-fit:cover;display:block}
+  .ord-tot{font-size:13.5px;color:var(--muted);margin-top:-4px}
+  .ord-note{font-size:13.5px;color:var(--muted)}
+  .pick{justify-content:flex-start!important;gap:12px;margin-bottom:8px;text-align:left;padding:8px 12px}
+  .pick-ph{width:52px;height:52px;border-radius:10px;object-fit:cover;flex:none;display:block}
+  .pick-t{display:flex;flex-direction:column;gap:2px;min-width:0}
 </style>
 <link rel="stylesheet" href="fonts/fonts.css?v=1">
 <link rel="stylesheet" href="css/luxe.css?v=1">
@@ -142,6 +163,7 @@
     try {
       const { data, error } = await db.rpc('ws_room', { p_code: code });
       if (error) throw error;
+      if (data){ const ro = await db.rpc('ws_room_order', { p_code: code }); data._order = ro.error ? null : ro.data; }   // update-32
       if (!data){ try { localStorage.removeItem(KEY); } catch(e){} return findPage('We could not find that order. Type your phone number instead.'); }
       try { localStorage.setItem(KEY, code); } catch(e){}
       const j = JSON.stringify(data); if (j === lastJson) return; lastJson = j; R = data; render();
@@ -156,16 +178,18 @@
     v.innerHTML = `
       <section class="card">
         <span class="k">ORDER ${esc(R.ref)}</span>
-        <h1>${R.qty} × ${esc(R.item)}</h1>
+        <h1>${R._order && R._order.lines && R._order.lines.length > 1 ? `${R.qty} pieces · ${R._order.lines.length} items` : `${R.qty} × ${esc(R.item)}`}</h1>
         <span class="sub">${R.name ? esc(R.name) + ' · ' : ''}Ready by ${esc(day(R.deadline + 'T12:00'))}${R.delivery_on ? ' · Delivery ' + esc(day(R.delivery_on + 'T12:00')) : ''}</span>
         <div class="bar">${steps.map(s => `<i class="${s.status}" title="${esc(s.name)}"></i>`).join('')}</div>
         <p class="nowline">${esc(status)}</p>
       </section>
 
+      ${orderCard()}
+
       ${todoCard()}
 
       <h2>Your pictures</h2>
-      <div class="pics">${(R.photos || []).map((p, i) => `<button class="pic" data-pic="${i}" aria-label="Open picture ${i + 1}"><img src="${esc(pub(p.path))}" alt="" loading="lazy"></button>`).join('')}
+      <div class="pics">${(R.photos || []).filter(p => !/^design\//.test(p.path)).map((p, i) => `<button class="pic" data-pic="${i}" aria-label="Open picture ${i + 1}"><img src="${esc(pub(p.path))}" alt="" loading="lazy"></button>`).join('')}
         <button class="add" id="addTile">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2E6B45" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add photo</button></div>
 
@@ -180,6 +204,8 @@
     $('#addTile').onclick = () => $('#photoIn').click();
     $('#otherOrder').onclick = () => { try { localStorage.removeItem(KEY); } catch(e){} location.href = location.pathname + '?find'; };
     v.querySelectorAll('[data-pic]').forEach(b => b.onclick = () => full(+b.dataset.pic));
+    v.querySelectorAll('[data-dpic]').forEach(b => b.onclick = () => fullList(designUrls(), +b.dataset.dpic));
+    v.querySelectorAll('[data-fpic]').forEach(b => b.onclick = () => fullList([b.dataset.fpic], 0));
     const ms = $('#msgs'); if (toMsgs && ms && ms.lastElementChild){ toMsgs = false; ms.lastElementChild.scrollIntoView({ block:'nearest' }); }
   }
 
@@ -209,7 +235,7 @@
       if (!list.length) return $('#findErr').textContent = 'No order found for this number. Check the number, or call Kartech.';
       if (list.length === 1) return go(list[0].code);
       $('#findList').innerHTML = `<p class="sub" style="margin:4px 0 8px">You have ${list.length} orders. Tap one:</p>` +
-        list.map(o => `<button class="btn line pick" data-code="${esc(o.code)}" style="justify-content:space-between;margin-bottom:8px"><span><b>${o.qty} × ${esc(o.item)}</b></span><span class="sub">${esc(o.ref)}${o.delivered ? ' · delivered' : ''}</span></button>`).join('');
+        list.map(o => `<button class="btn line pick" data-code="${esc(o.code)}">${o.thumb ? `<img class="pick-ph" src="${esc(pub(o.thumb))}" alt="">` : `<i class="pick-ph" style="background:${esc(o.hex || '#E7F1EA')}"></i>`}<span class="pick-t"><b>${o.qty} × ${esc(o.item)}</b><span class="sub">${esc(o.ref)}${o.delivered ? ' · delivered' : ''}</span></span></button>`).join('');
       v.querySelectorAll('[data-code]').forEach(b => b.onclick = () => go(b.dataset.code));
     };
   }
@@ -274,8 +300,30 @@
     };
   }
 
+  // ---------- what she ordered: items, fabric, design pictures (never prices) ----------
+  const designUrls = () => ((R._order && R._order.design) || []).map(pub);
+  function orderCard(){
+    const od = R._order; if (!od || !od.lines) return '';
+    const pics = designUrls(), many = od.lines.length > 1;
+    const swatch = l => l.photo ? `<button class="sw sw-ph" data-fpic="${esc(l.photo)}" aria-label="See the fabric"><img src="${esc(l.photo)}" alt=""></button>`
+      : `<i class="sw" style="background:${esc(l.hex || '#ccc')}"></i>`;
+    return `<section class="card ord">
+      <h2 class="ord-h">What you ordered</h2>
+      ${pics.length ? `<div class="ord-pics ${pics.length === 1 ? 'one' : ''}">${pics.map((u, i) => `<button class="ord-pic" data-dpic="${i}" aria-label="Open design picture ${i + 1}"><img src="${esc(u)}" alt="" loading="lazy"></button>`).join('')}</div>` : ''}
+      <ul class="ord-lines">${od.lines.map(l => `<li><span class="ord-q">${l.qty} ×</span><span class="ord-i"><b>${esc(l.item)}</b>${l.fabric ? `<small>${esc(l.fabric)}</small>` : ''}</span>${l.fabric ? swatch(l) : ''}</li>`).join('')}</ul>
+      ${many ? `<p class="ord-tot">${od.lines.reduce((a, l) => a + l.qty, 0)} pieces in total</p>` : ''}
+      <p class="ord-note">Something not right? Write to us below before we start.</p>
+    </section>`;
+  }
+  function fullList(urls, i){
+    if (!urls[i]) return;
+    const o = document.createElement('div'); o.className = 'full';
+    o.innerHTML = `<img src="${esc(urls[i])}" alt="Picture ${i + 1}"><button>Close</button>${urls.length > 1 ? `<p style="color:#ccc;font-size:14px">${i + 1} of ${urls.length} · tap for the next</p>` : ''}`;
+    o.onclick = e => { o.remove(); if (!e.target.closest('button') && urls.length > 1) fullList(urls, (i + 1) % urls.length); };
+    document.body.appendChild(o);
+  }
   function full(i){
-    const ps = R.photos || []; if (!ps[i]) return;
+    const ps = (R.photos || []).filter(p => !/^design\//.test(p.path)); if (!ps[i]) return;
     const o = document.createElement('div'); o.className = 'full';
     o.innerHTML = `<img src="${esc(pub(ps[i].path))}" alt="Picture ${i + 1}"><button>Close</button>${ps.length > 1 ? `<p style="color:#ccc;font-size:14px">${i + 1} of ${ps.length} · tap for the next</p>` : ''}`;
     o.onclick = e => { o.remove(); if (!e.target.closest('button') && ps.length > 1) full((i + 1) % ps.length); };

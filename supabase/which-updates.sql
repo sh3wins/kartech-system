@@ -35,6 +35,9 @@ from (values
   (26, 'update-26-shop-products.sql', 'UPDATE 26: the owner runs the website shop from her app', to_regclass('public.kt_products') is not null),
   (27, 'update-27-relink-invoices.sql', 'UPDATE 27: an order brought back from the Bin gets its invoice back', exists (select 1 from pg_trigger where tgname = 'kt_relink_invoices')),
   (28, 'update-28-messages.sql', 'UPDATE 28: messages between the owner and each worker', to_regclass('public.ws_messages') is not null),
-  (29, 'update-29-fabrics.sql', 'UPDATE 29: fabrics and colours (stock, orders, shop)', to_regclass('public.kt_fabrics') is not null)
+  (29, 'update-29-fabrics.sql', 'UPDATE 29: fabrics and colours (stock, orders, shop)', to_regclass('public.kt_fabrics') is not null),
+  (30, 'update-30-fabric-photos.sql', 'UPDATE 30: a photo on each fabric', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'kt_fabrics' and column_name = 'photo')),
+  (31, 'update-31-order-lines.sql', 'UPDATE 31: several items in one order', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'ws_orders' and column_name = 'lines')),
+  (32, 'update-32-client-sees-order.sql', 'UPDATE 32: the client sees what she ordered', to_regprocedure('public.ws_room_order(text)') is not null)
 ) v(nr, file, about, ok)
 order by nr;

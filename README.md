@@ -57,7 +57,7 @@ kartech-system/
 │   ├── check-security.sql   checks who can see what
 │   └── old/                 retired files, do not use
 ├── tests/
-│   └── business-rules.sql   44 tests for money, orders and permissions
+│   └── business-rules.sql   54 tests for money, orders and permissions
 └── docs/                SETUP, DATABASE, SECURITY, TESTING guides
 ```
 

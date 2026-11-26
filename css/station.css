@@ -339,3 +339,23 @@ textarea.fm-in{resize:vertical;font-weight:600}
 .fab-sw.big{ width:30px; height:30px; border-radius:8px; vertical-align:-9px; margin:0 8px }
 .fab-chips{ max-height:200px; overflow-y:auto }
 .note.fabn{ font-size:1.15em }
+.fab-sw.ph{ width:22px; height:22px; background-size:cover !important }
+.note.fabn{ display:flex; align-items:center; gap:12px }
+.note.fabn .fab-sw.big{ margin:0 }
+.note.fabn .fab-ph{ width:84px; height:84px; object-fit:cover; border-radius:10px; border:1px solid rgba(0,0,0,.12) }
+/* several items in one order */
+.no-x{ border:1px solid var(--line, #E2E4E8); border-left:4px solid var(--gold, #B8933F); border-radius:14px; padding:14px 16px 4px; margin-bottom:14px; background:rgba(255,255,255,.6) }
+.no-x-h{ display:flex; justify-content:space-between; align-items:center; margin-bottom:10px }
+.no-x-rm{ border:0; background:none; color:#C0392B; font:inherit; font-size:14px; cursor:pointer }
+.no-xadd{ margin:0 0 18px }
+.no-xadd small{ opacity:.7; font-weight:400 }
+.note.jl{ padding:0; overflow:hidden }
+.jl-t{ display:block; padding:10px 14px; font-size:.85em; opacity:.75; border-bottom:1px solid rgba(0,0,0,.08) }
+.jl-r{ display:grid; grid-template-columns:auto 1fr auto; gap:12px; align-items:center; padding:12px 14px; border-bottom:1px solid rgba(0,0,0,.08); font-size:1.08em }
+.jl-r:last-child{ border-bottom:0 }
+.jl-q{ font-weight:800 }
+.jl-i{ font-weight:700 }
+.jl-f{ display:inline-flex; align-items:center; gap:8px }
+.jl-f.muted{ opacity:.6 }
+.jl-ph{ width:40px; height:40px; object-fit:cover; border-radius:8px }
+@media (max-width:640px){ .jl-r{ grid-template-columns:auto 1fr } .jl-f{ grid-column:2 } }

@@ -1,7 +1,7 @@
 -- =====================================================================
 --  KARTECH WORKSHOP: INSTALL EVERYTHING (brand-new Supabase project)
 --  This is every database file, in the right order, in one file:
---  00-website-basics → setup-workshop → update-1 … update-29.
+--  00-website-basics → setup-workshop → update-1 … update-32.
 --
 --  Use it for a NEW project, or to bring an existing project fully up
 --  to date. Paste ALL of it into Supabase → SQL Editor → New query → Run.
@@ -4909,3 +4909,279 @@ revoke all on function public.kt_save_fabric(jsonb), public.kt_fabric_metres(uui
   public.ws_foreman_set_fabric(text, uuid, uuid), public.ws_job_fabric(uuid) from public, anon;
 grant execute on function public.kt_save_fabric(jsonb), public.kt_fabric_metres(uuid, numeric), public.kt_set_order_fabric(uuid, uuid),
   public.ws_foreman_set_fabric(text, uuid, uuid), public.ws_job_fabric(uuid) to authenticated;
+
+-- ############################################################
+-- ##  FILE: update-30-fabric-photos.sql
+-- ############################################################
+-- =====================================================================
+--  UPDATE 30: a photo on each fabric
+--  • Each fabric can have a real photo of the material (as well as its
+--    colour swatch). The owner adds it in Stock → Fabrics.
+--  • The photo shows on the fabric list, on orders, on the workshop
+--    screen and on the worker's job card.
+--  • Photos go in the public "shop-photos" folder (from update 26).
+--  Needs update 26 and update 29 first.
+--  Paste ALL of this into Supabase → SQL Editor → New query → Run.
+--  Safe to run again.
+-- =====================================================================
+alter table public.kt_fabrics add column if not exists photo text;
+
+-- OWNER: add or change a fabric (now with an optional photo)
+create or replace function public.kt_save_fabric(p jsonb) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare v_id uuid := nullif(p->>'id', '')::uuid; k text := left(trim(coalesce(p->>'kind', '')), 60); c text := left(trim(coalesce(p->>'colour', '')), 60);
+        h text := coalesce(nullif(trim(p->>'hex'), ''), '#888888');
+        ph text := nullif(trim(coalesce(p->>'photo', '')), '');
+begin
+  perform public.ws_need_owner();
+  if k = '' or c = '' then raise exception 'Give the fabric a type and a colour'; end if;
+  if h !~ '^#[0-9A-Fa-f]{6}$' then h := '#888888'; end if;
+  if ph is not null and ph !~ '^https?://[^\s"''<>]+$' then raise exception 'That photo link does not look right'; end if;
+  if exists (select 1 from public.kt_fabrics where active and lower(kind) = lower(k) and lower(colour) = lower(c) and id is distinct from v_id) then
+    raise exception '% · % is already on the list', k, c; end if;
+  if v_id is null then
+    insert into public.kt_fabrics (kind, colour, hex, metres, low_at, photo) values (k, c, h, greatest(coalesce((p->>'metres')::numeric, 0), 0), greatest(coalesce((p->>'low_at')::numeric, 5), 0), ph) returning id into v_id;
+  else
+    update public.kt_fabrics set kind = k, colour = c, hex = h,
+      metres = case when p ? 'metres' then greatest((p->>'metres')::numeric, 0) else metres end,
+      low_at = case when p ? 'low_at' then greatest((p->>'low_at')::numeric, 0) else low_at end,
+      photo  = case when p ? 'photo' then ph else photo end,
+      active = coalesce((p->>'active')::boolean, active), updated_at = now()
+    where id = v_id;
+  end if;
+  return v_id;
+end $$;
+
+-- WORKER: the fabric on my current job, now with its photo
+create or replace function public.ws_job_fabric(p_token uuid) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare w public.ws_workers; r jsonb;
+begin
+  w := public.ws_me(p_token);
+  select jsonb_build_object('name', o.fabric, 'hex', o.fabric_hex, 'photo', f.photo) into r
+    from public.ws_tasks t join public.ws_orders o on o.id = t.order_id
+    left join public.kt_fabrics f on f.id = o.fabric_id
+   where t.id = w.task_id and o.fabric is not null;
+  return r;
+end $$;
+
+revoke all on function public.kt_save_fabric(jsonb), public.ws_job_fabric(uuid) from public, anon;
+grant execute on function public.kt_save_fabric(jsonb), public.ws_job_fabric(uuid) to authenticated;
+
+-- ############################################################
+-- ##  FILE: update-31-order-lines.sql
+-- ############################################################
+-- =====================================================================
+--  UPDATE 31: several items in one order
+--  • One order (one order number) can hold several lines, each with its
+--    own item, quantity and fabric. e.g. 10 bar stools in red
+--    leatherette + 6 bar stools in black.
+--  • The lines live inside the order, so the Bin keeps and brings them
+--    back with the order.
+--  • The order's "What" and "How many" become a summary of the lines,
+--    so every screen that shows an order keeps working.
+--  • The worker's job card lists every line.
+--  Needs update 29 (fabrics) and update 30 (fabric photos) first.
+--  Paste ALL of this into Supabase → SQL Editor → New query → Run.
+--  Safe to run again.
+-- =====================================================================
+alter table public.ws_orders add column if not exists lines jsonb;
+
+-- tidy the lines someone typed: [{ item, qty, fabric_id }] → checked lines with fabric names
+create or replace function public.kt_clean_lines(p jsonb) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare it jsonb; out jsonb := '[]'::jsonb; nm text; q int; f public.kt_fabrics;
+begin
+  if p is null or jsonb_typeof(p) <> 'array' then raise exception 'No items given'; end if;
+  if jsonb_array_length(p) > 30 then raise exception 'At most 30 items in one order'; end if;
+  for it in select * from jsonb_array_elements(p) loop
+    nm := left(trim(coalesce(it->>'item', '')), 120);
+    q  := coalesce(nullif(trim(coalesce(it->>'qty', '')), '')::int, 0);
+    if nm = '' then raise exception 'Each item needs a name'; end if;
+    if q < 1 or q > 100000 then raise exception 'How many for "%" must be 1 or more', nm; end if;
+    f := null;
+    if nullif(it->>'fabric_id', '') is not null then
+      select * into f from public.kt_fabrics where id = (it->>'fabric_id')::uuid;
+    end if;
+    out := out || jsonb_build_array(jsonb_build_object('item', nm, 'qty', q,
+      'fabric_id', f.id, 'fabric', case when f.id is null then null else f.kind || ' · ' || f.colour end, 'hex', f.hex));
+  end loop;
+  if jsonb_array_length(out) = 0 then raise exception 'No items given'; end if;
+  return out;
+end $$;
+
+-- put the lines on an order and update its summary ("What", "How many", fabric)
+create or replace function public.kt_apply_lines(p_order uuid, p_lines jsonb) returns void
+language plpgsql security definer set search_path = public as $$
+declare l jsonb := public.kt_clean_lines(p_lines); n int := jsonb_array_length(l); names text; total int;
+begin
+  select sum((x->>'qty')::int) into total from jsonb_array_elements(l) x;
+  select string_agg(nm, ' + ' order by first) into names
+    from (select x->>'item' nm, min(i) first from jsonb_array_elements(l) with ordinality t(x, i) group by 1) g;
+  if n = 1 then
+    update public.ws_orders set lines = null, item = l->0->>'item', qty = total,
+           fabric_id = (l->0->>'fabric_id')::uuid, fabric = l->0->>'fabric', fabric_hex = l->0->>'hex'
+     where id = p_order;
+  else
+    update public.ws_orders set lines = l, item = left(names, 120), qty = total,
+           fabric_id = null, fabric = null, fabric_hex = null
+     where id = p_order;
+  end if;
+  if not found then raise exception 'Order not found'; end if;
+end $$;
+
+-- OWNER: set the items of an order
+create or replace function public.kt_set_order_lines(p_order uuid, p_lines jsonb) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public.ws_need_owner();
+  perform public.kt_apply_lines(p_order, p_lines);
+end $$;
+
+-- MANAGER (with the manager code): set the items of an order that isn't delivered yet
+create or replace function public.ws_foreman_set_lines(p_pin text, p_order uuid, p_lines jsonb) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public.ws_foreman_ok(p_pin);
+  if not exists (select 1 from public.ws_orders where id = p_order and delivered_at is null) then raise exception 'Order not found'; end if;
+  perform public.kt_apply_lines(p_order, p_lines);
+end $$;
+
+-- WORKER (signed in): the fabric(s) and items for my current job, with photos
+create or replace function public.ws_job_fabric(p_token uuid) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare w public.ws_workers; o public.ws_orders; r jsonb;
+begin
+  w := public.ws_me(p_token);
+  select o2.* into o from public.ws_tasks t join public.ws_orders o2 on o2.id = t.order_id where t.id = w.task_id;
+  if o.id is null then return null; end if;
+  if o.lines is not null then
+    return jsonb_build_object('lines', (select jsonb_agg(jsonb_build_object('item', x->>'item', 'qty', (x->>'qty')::int,
+              'fabric', x->>'fabric', 'hex', x->>'hex', 'photo', f.photo) order by i)
+         from jsonb_array_elements(o.lines) with ordinality t(x, i)
+         left join public.kt_fabrics f on f.id = nullif(x->>'fabric_id', '')::uuid));
+  end if;
+  if o.fabric is null then return null; end if;
+  select jsonb_build_object('name', o.fabric, 'hex', o.fabric_hex, 'photo', f.photo) into r
+    from (select 1) one left join public.kt_fabrics f on f.id = o.fabric_id;
+  return r;
+end $$;
+
+revoke all on function public.kt_clean_lines(jsonb), public.kt_apply_lines(uuid, jsonb) from public, anon, authenticated;
+revoke all on function public.kt_set_order_lines(uuid, jsonb), public.ws_foreman_set_lines(text, uuid, jsonb), public.ws_job_fabric(uuid) from public, anon;
+grant execute on function public.kt_set_order_lines(uuid, jsonb), public.ws_foreman_set_lines(text, uuid, jsonb), public.ws_job_fabric(uuid) to authenticated;
+
+-- ############################################################
+-- ##  FILE: update-32-client-sees-order.sql
+-- ############################################################
+-- =====================================================================
+--  UPDATE 32: the client sees what she ordered
+--  • Her Order Room gets a "What you ordered" card at the top: every
+--    item, how many, the fabric (with its photo) and the design pictures.
+--  • In "find my orders by phone", each order shows a small picture.
+--  • Design pictures ("what to make") now go to the client-visible photo
+--    store (room-files, folder "design/"). Old ones move over by
+--    themselves the next time the owner opens the order.
+--  • Finished-work photos stay private, as before.
+--  • Prices, workers and notes are NEVER shown to the client.
+--  Needs updates 16, 19, 29, 30, 31 first.
+--  Paste ALL of this into Supabase → SQL Editor → New query → Run.
+--  Safe to run again.
+-- =====================================================================
+
+-- the owner and the workshop computer may put design pictures in design/<order id>/…
+do $do$
+begin
+  if exists (select 1 from information_schema.schemata where schema_name = 'storage') then
+    drop policy if exists "room files staff add design" on storage.objects;
+    create policy "room files staff add design" on storage.objects for insert to authenticated
+      with check (bucket_id = 'room-files' and (storage.foldername(name))[1] = 'design'
+                  and (public.is_admin() or public.ws_is_station()));
+  end if;
+end $do$;
+
+-- OWNER: add a photo (design pictures may now sit in room-files/design/<order>/…)
+create or replace function public.ws_add_photo(p_order uuid, p_path text, p_kind text) returns void
+language plpgsql security definer set search_path = public as $$
+declare o public.ws_orders; k text := case when p_kind = 'ref' then 'ref' else 'done' end; b text := 'kartech-photos';
+begin
+  perform public.ws_need_owner();
+  select * into o from public.ws_orders where id = p_order;
+  if o.id is null then raise exception 'Order not found'; end if;
+  if k = 'ref' and p_path like 'design/' || o.id::text || '/%' then b := 'room-files';
+  elsif p_path is null or p_path not like o.id::text || '/%' then raise exception 'Bad photo'; end if;
+  insert into public.ws_photos (order_id, path, kind, bucket) values (o.id, p_path, k, b);
+  perform public.ws_note('good', case when k = 'ref' then 'Picture of what to make added to ' else 'Photo of finished work added to ' end || o.ref, o.id);
+end $$;
+
+-- MANAGER: add a design picture to an order she just took
+create or replace function public.ws_foreman_add_photo(p_pin text, p_order uuid, p_path text) returns void
+language plpgsql security definer set search_path = public as $$
+declare o public.ws_orders; b text := 'kartech-photos';
+begin
+  perform public.ws_foreman_ok(p_pin);
+  select * into o from public.ws_orders where id = p_order;
+  if o.id is null then raise exception 'Order not found'; end if;
+  if p_path like 'design/' || o.id::text || '/%' then b := 'room-files';
+  elsif p_path is null or p_path not like o.id::text || '/%' then raise exception 'Bad photo'; end if;
+  insert into public.ws_photos (order_id, path, kind, bucket) values (o.id, p_path, 'ref', b);
+  perform public.ws_note('good', 'Manager added a picture of what to make to ' || o.ref, o.id);
+end $$;
+
+-- OWNER: an old design picture was copied to room-files; point the photo at the copy
+create or replace function public.kt_photo_to_room(p_photo bigint, p_path text) returns void
+language plpgsql security definer set search_path = public as $$
+declare ph public.ws_photos;
+begin
+  perform public.ws_need_owner();
+  select * into ph from public.ws_photos where id = p_photo;
+  if ph.id is null or ph.kind <> 'ref' or ph.bucket <> 'kartech-photos' then raise exception 'Photo not found'; end if;
+  if p_path not like 'design/' || ph.order_id::text || '/%' then raise exception 'Bad photo'; end if;
+  update public.ws_photos set bucket = 'room-files', path = p_path where id = ph.id;
+end $$;
+
+-- CLIENT (with the room code): what she ordered. No prices, no workers, no notes.
+create or replace function public.ws_room_order(p_code text) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare o public.ws_orders;
+begin
+  select * into o from public.ws_orders where room_code = lower(trim(p_code));
+  if o.id is null then return null; end if;
+  return jsonb_build_object(
+    'lines', case when o.lines is not null then
+               (select jsonb_agg(jsonb_build_object('item', x->>'item', 'qty', (x->>'qty')::int, 'fabric', x->>'fabric', 'hex', x->>'hex', 'photo', f.photo) order by i)
+                  from jsonb_array_elements(o.lines) with ordinality t(x, i)
+                  left join public.kt_fabrics f on f.id = nullif(x->>'fabric_id', '')::uuid)
+             else jsonb_build_array(jsonb_build_object('item', o.item, 'qty', o.qty, 'fabric', o.fabric, 'hex', o.fabric_hex,
+                    'photo', (select f.photo from public.kt_fabrics f where f.id = o.fabric_id))) end,
+    'design', (select coalesce(jsonb_agg(p.path order by p.id), '[]'::jsonb) from public.ws_photos p
+                where p.order_id = o.id and p.kind = 'ref' and p.bucket = 'room-files' and p.path like 'design/%'));
+end $$;
+
+-- CLIENT: find my orders by phone, now with a small picture for each
+create or replace function public.ws_find_rooms(p_phone text) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare d text := regexp_replace(coalesce(p_phone, ''), '\D', '', 'g');
+begin
+  if length(d) < 9 then raise exception 'Type your full phone number, e.g. 0712 345 678'; end if;
+  d := right(d, 9);
+  return coalesce((
+    select jsonb_agg(jsonb_build_object('ref', o.ref, 'item', o.item, 'qty', o.qty, 'code', o.room_code,
+                                        'delivered', o.delivered_at is not null,
+                                        'thumb', (select p.path from public.ws_photos p where p.order_id = o.id and p.kind = 'ref'
+                                                    and p.bucket = 'room-files' and p.path like 'design/%' order by p.id limit 1),
+                                        'hex', coalesce(o.fabric_hex, o.lines->0->>'hex')) order by o.created_at desc)
+    from public.ws_orders o
+    where o.room_code is not null
+      and (o.delivered_at is null or o.delivered_at > now() - interval '60 days')
+      and (regexp_replace(o.customer, '\D', '', 'g') like '%' || d || '%'
+           or regexp_replace(coalesce(o.notes, ''), '\D', '', 'g') like '%' || d || '%'
+           or exists (select 1 from public.orders w where w.id = o.source_order_id
+                        and regexp_replace(coalesce(w.phone, ''), '\D', '', 'g') like '%' || d))
+  ), '[]'::jsonb);
+end $$;
+
+revoke all on function public.kt_photo_to_room(bigint, text) from public, anon;
+grant execute on function public.kt_photo_to_room(bigint, text) to authenticated;
+grant execute on function public.ws_room_order(text) to anon, authenticated;
+grant execute on function public.ws_find_rooms(text) to anon, authenticated;

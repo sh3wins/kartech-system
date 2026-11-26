@@ -50,8 +50,11 @@ The system shares one Supabase project with the Kartech **website**. File `00` c
 | 27 | `update-27-relink-invoices.sql` | an order brought back from the Bin gets its invoice back |
 | 28 | `update-28-messages.sql` | messages between the owner and each worker |
 | 29 | `update-29-fabrics.sql` | fabrics and colours: a fabric list with metres, a fabric on each order, colours on shop products |
+| 30 | `update-30-fabric-photos.sql` | a photo on each fabric |
+| 31 | `update-31-order-lines.sql` | several items in one order (each with its own quantity and fabric) |
+| 32 | `update-32-client-sees-order.sql` | the client sees what she ordered: items, fabric and design pictures (never prices) |
 
-The order matters: each update builds on the ones before it. Updates 1 to 29 have been tested on a brand-new database, in this order, with no errors. All 44 business-rule tests and all security checks pass afterwards.
+The order matters: each update builds on the ones before it. Updates 1 to 32 have been tested on a brand-new database, in this order, with no errors. All 54 business-rule tests and all security checks pass afterwards.
 
 ### Helper files (read-only, they change nothing)
 

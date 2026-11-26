@@ -269,6 +269,15 @@ begin
         perform public.kt_set_order_fabric(o_id, fb);
         select count(*) into n from public.ws_orders where id = o_id and fabric = 'TEST fabric · Pink';
         res := res || format('%s|An order can carry a fabric and colour|%s order', case when n = 1 then 'PASS' else 'FAIL' end, n);
+        if exists (select 1 from information_schema.columns where table_name = 'kt_fabrics' and column_name = 'photo') then
+          perform public.kt_save_fabric(jsonb_build_object('id', fb, 'kind', 'TEST fabric', 'colour', 'Pink', 'photo', 'https://example.com/f.jpg'));
+          select count(*) into n from public.kt_fabrics where id = fb and photo = 'https://example.com/f.jpg';
+          res := res || format('%s|A fabric can have a photo|%s saved', case when n = 1 then 'PASS' else 'FAIL' end, n);
+          begin
+            perform public.kt_save_fabric(jsonb_build_object('id', fb, 'kind', 'TEST fabric', 'colour', 'Pink', 'photo', 'javascript:alert(1)'));
+            res := res || 'FAIL|A broken photo link is refused|it was saved'::text;
+          exception when others then res := res || ('PASS|A broken photo link is refused|' || sqlerrm); end;
+        end if;
         execute 'reset role';
         perform set_config('request.jwt.claim.sub', station_id::text, true);
         perform set_config('request.jwt.claims', json_build_object('sub', station_id, 'role', 'authenticated')::text, true);
@@ -289,6 +298,53 @@ begin
         exception when others then res := res || ('PASS|A stranger cannot see the fabric list|' || sqlerrm); end;
         execute 'reset role';
       end;
+    end if;
+
+    -- ---------- several items in one order (update 31) ----------
+    if exists (select 1 from information_schema.columns where table_name = 'ws_orders' and column_name = 'lines') then
+      perform set_config('request.jwt.claim.sub', owner_id::text, true);
+      perform set_config('request.jwt.claims', json_build_object('sub', owner_id, 'role', 'authenticated')::text, true);
+      execute 'set local role authenticated';
+      perform public.kt_set_order_lines(o_id, '[{"item":"Bar stools","qty":10},{"item":"Bar stools","qty":6},{"item":"Round tables","qty":2}]'::jsonb);
+      select count(*) into n from public.ws_orders where id = o_id and qty = 18 and jsonb_array_length(lines) = 3 and item = 'Bar stools + Round tables';
+      res := res || format('%s|One order can hold several items|%s right', case when n = 1 then 'PASS' else 'FAIL' end, n);
+      perform public.kt_set_order_lines(o_id, '[{"item":"Test chairs","qty":3}]'::jsonb);
+      select count(*) into n from public.ws_orders where id = o_id and qty = 3 and lines is null;
+      res := res || format('%s|Going back to one item makes it a plain order again|%s right', case when n = 1 then 'PASS' else 'FAIL' end, n);
+      begin
+        perform public.kt_set_order_lines(o_id, '[{"item":"","qty":3}]'::jsonb);
+        res := res || 'FAIL|An item with no name is refused|it was saved'::text;
+      exception when others then res := res || ('PASS|An item with no name is refused|' || sqlerrm); end;
+      execute 'reset role';
+      perform set_config('request.jwt.claim.sub', station_id::text, true);
+      perform set_config('request.jwt.claims', json_build_object('sub', station_id, 'role', 'authenticated')::text, true);
+      execute 'set local role authenticated';
+      begin
+        perform public.kt_set_order_lines(o_id, '[{"item":"hack","qty":1}]'::jsonb);
+        res := res || 'FAIL|The workshop computer cannot change items without the manager code|it was changed'::text;
+      exception when others then res := res || ('PASS|The workshop computer cannot change items without the manager code|' || sqlerrm); end;
+      execute 'reset role';
+    end if;
+
+    -- ---------- the client sees what she ordered (update 32) ----------
+    if to_regprocedure('public.ws_room_order(text)') is not null then
+      execute 'reset role';
+      declare od jsonb; rc text := (select room_code from public.ws_orders where id = o_id); begin
+        if rc is null then rc := 'testroom' || substr(md5(random()::text), 1, 6); update public.ws_orders set room_code = rc where id = o_id; end if;
+        perform set_config('request.jwt.claim.sub', '', true);
+        perform set_config('request.jwt.claims', '{"role":"anon"}', true);
+        execute 'set local role anon';
+        od := public.ws_room_order(rc);
+        res := res || format('%s|The client sees her items with the order link|%s', case when od ? 'lines' and jsonb_array_length(od->'lines') >= 1 then 'PASS' else 'FAIL' end, coalesce(od->'lines'->0->>'item', 'nothing'));
+        res := res || format('%s|The client never sees prices or workers|%s', case when od::text !~* 'price|total|worker|amount' then 'PASS' else 'FAIL' end, 'checked');
+        od := public.ws_room_order('not-a-real-code');
+        res := res || format('%s|A wrong link shows nothing|%s', case when od is null then 'PASS' else 'FAIL' end, coalesce(od::text, 'nothing'));
+      end;
+      begin
+        perform public.kt_photo_to_room(1, 'design/x/y.jpg');
+        res := res || 'FAIL|A stranger cannot move photos|it ran'::text;
+      exception when others then res := res || ('PASS|A stranger cannot move photos|' || sqlerrm); end;
+      execute 'reset role';
     end if;
 
     -- ---------- as the OWNER again: the Bin ----------

@@ -100,7 +100,7 @@
       S.hasCode = hc.error ? null : !!hc.data;
       S.toolMissing = tm.error ? [] : tm.data.map(x => ({ tool:x.tool_id, worker:x.worker_id, since:String(x.since).slice(0, 10), found: !!x.found_at }));
       S.std = sd.error ? [] : sd.data.map(x => ({ product:x.product, mat:x.material_id, per:+x.per_piece }));
-      S.orders = o.data.map(x => ({ fabric:x.fabric || null, fabricHex:x.fabric_hex || null, fabricId:x.fabric_id || null, id:x.id, ref:x.ref, src:x.source_order_id || null, srcNo:x.source_no || null, customer:x.customer, item:x.item, qty:x.qty, deadline:new Date(x.deadline + 'T17:00'), dl:String(x.deadline).slice(0, 10), urgency:x.urgency, notes:x.notes, stages:x.stages, delivered: !!x.delivered_at, createdAt: new Date(x.created_at).getTime(), by: x.created_by || 'owner', reqId: x.request_id || null, room: x.room_code || null, approvedAt: x.approved_at ? new Date(x.approved_at).getTime() : null, delOn: x.delivery_on ? String(x.delivery_on).slice(0, 10) : null, delPlace: x.delivery_place || '', delNote: x.delivery_note || '', deliveredAt: x.delivered_at ? new Date(x.delivered_at).getTime() : null,
+      S.orders = o.data.map(x => ({ lines:x.lines || null, fabric:x.fabric || null, fabricHex:x.fabric_hex || null, fabricId:x.fabric_id || null, id:x.id, ref:x.ref, src:x.source_order_id || null, srcNo:x.source_no || null, customer:x.customer, item:x.item, qty:x.qty, deadline:new Date(x.deadline + 'T17:00'), dl:String(x.deadline).slice(0, 10), urgency:x.urgency, notes:x.notes, stages:x.stages, delivered: !!x.delivered_at, createdAt: new Date(x.created_at).getTime(), by: x.created_by || 'owner', reqId: x.request_id || null, room: x.room_code || null, approvedAt: x.approved_at ? new Date(x.approved_at).getTime() : null, delOn: x.delivery_on ? String(x.delivery_on).slice(0, 10) : null, delPlace: x.delivery_place || '', delNote: x.delivery_note || '', deliveredAt: x.delivered_at ? new Date(x.delivered_at).getTime() : null,
         hold: !!x.on_hold, invoiceAt: tms(x.invoice_at), depCode: x.dep_code || null, depClaimed: tms(x.dep_claimed_at), depOk: tms(x.dep_ok_at), balCode: x.bal_code || null, balClaimed: tms(x.bal_claimed_at), paidAt: tms(x.paid_at) }));
       S.tasks = t.data.map(x => ({ id:x.id, order:x.order_id, step:x.step, stage:x.stage, status:x.status, worker:x.worker_id, rank:x.rank, withPrev: !!x.with_prev, doneAt: x.done_at ? new Date(x.done_at).getTime() : null, planned: Array.isArray(x.planned) ? x.planned : String(x.planned || '').replace(/[{}]/g, '').split(',').filter(Boolean),
         problem: x.problem_at ? { reason:x.problem_reason, at:new Date(x.problem_at).getTime(), stopped:!!x.problem_stopped, ack: !!x.problem_ack_at } : null }));
@@ -118,6 +118,7 @@
       S.prods = pr.error ? null : pr.data;
       const fb2 = await db.from('kt_fabrics').select('*').eq('active', true).order('kind').order('colour');
       S.fabs = fb2.error ? null : fb2.data;
+      if (S.hasLines === undefined){ const hl = await db.from('ws_orders').select('lines').limit(1); S.hasLines = !hl.error; }
       // messages with workers (update-28)
       const ms = await db.from('ws_messages').select('*').order('created_at', { ascending:false }).limit(600);
       const prevIds = S.msgs ? new Set(S.msgs.map(m => m.id)) : null;
@@ -995,6 +996,24 @@
 
   /* ---------- photos of the work (private, owner only) ---------- */
   const PH_BUCKET = 'kartech-photos';
+  const ROOM_BUCKET = 'room-files';
+  // older design pictures sit in the private store; copy them (once) to where the client can see them
+  const movedOrders = new Set();
+  async function moveDesignPics(orderId, rows){
+    if (movedOrders.has(orderId) || !db.storage) return false; movedOrders.add(orderId);
+    let moved = 0;
+    for (const x of rows.filter(r => r.kind === 'ref' && (r.bucket || PH_BUCKET) === PH_BUCKET)){
+      try {
+        const dl = await db.storage.from(PH_BUCKET).download(x.path); if (dl.error || !dl.data) continue;
+        const np = `design/${orderId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+        const up = await db.storage.from(ROOM_BUCKET).upload(np, dl.data, { contentType: dl.data.type || 'image/jpeg', upsert:false }); if (up.error) return moved > 0;
+        const r = await db.rpc('kt_photo_to_room', { p_photo: x.id, p_path: np });
+        if (r.error){ await db.storage.from(ROOM_BUCKET).remove([np]); return moved > 0; }   // update-32 not run yet
+        await db.storage.from(PH_BUCKET).remove([x.path]); moved++;
+      } catch (e){}
+    }
+    return moved > 0;
+  }
   async function loadPhotos(orderId){
     const gr = $('#phRef'); if (gr) loadPhotoGrid(orderId, gr, 'ref');
     const g = $('#phGrid'); if (g) loadPhotoGrid(orderId, g, 'done');
@@ -1003,6 +1022,8 @@
     const { data: all, error } = await db.from('ws_photos').select('*').in('order_id', [orderId]).order('id');
     if (!document.body.contains(g)) return;
     if (error){ g.innerHTML = `<span class="ph-empty">${/ws_photos/.test(errMsg(error)) ? 'Run update-12-all.sql in Supabase to turn on photos.' : esc(errMsg(error))}</span>`; return; }
+    if (kind === 'ref' && all.some(x => x.kind === 'ref' && (x.bucket || PH_BUCKET) === PH_BUCKET))
+      moveDesignPics(orderId, all).then(m => { if (m && document.body.contains(g)) loadPhotoGrid(orderId, g, kind); });
     const data = all.filter(x => (x.kind || 'done') === kind);
     if (!data.length){ g.innerHTML = `<span class="ph-empty">${kind === 'ref' ? 'No pictures yet. Add one so nobody has to guess.' : 'No photos yet.'}</span>`; return; }
     const urls = await signAll(data);
@@ -1016,6 +1037,7 @@
       if (error) return toast(errMsg(error));
       const row = data.find(x => String(x.id) === b.dataset.phrm);
       if (path && db.storage && (!row || (row.bucket || PH_BUCKET) === PH_BUCKET)) await db.storage.from(PH_BUCKET).remove([path]);
+      else if (path && db.storage && row && row.bucket === ROOM_BUCKET && /^design\//.test(path)) await db.storage.from(ROOM_BUCKET).remove([path]);
       toast('Picture moved to the 🗑 Bin'); loadPhotos(orderId); };
   }
   function shrink(file){
@@ -1029,11 +1051,19 @@
     const g = $(kind === 'ref' ? '#phRef' : '#phGrid'); if (g) g.insertAdjacentHTML('beforeend', '<span class="ph-empty" id="phUp">Uploading…</span>');
     try {
       if (!db.storage) throw new Error('Photos need the real Supabase');
-      const blob = await shrink(file), path = `${o.id}/${Date.now()}.jpg`;
-      const up = await db.storage.from(PH_BUCKET).upload(path, blob, { contentType:'image/jpeg', upsert:false });
-      if (up.error) throw up.error;
-      const { error } = await db.rpc('ws_add_photo', { p_order: o.id, p_path: path, p_kind: kind || 'done' });
-      if (error){ await db.storage.from(PH_BUCKET).remove([path]); throw error; }
+      const blob = await shrink(file);
+      // design pictures go where the client can see them (update-32); finished-work photos stay private
+      let bk = PH_BUCKET, path = `${o.id}/${Date.now()}.jpg`;
+      if (kind === 'ref'){ const dp = `design/${o.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+        const tryUp = await db.storage.from(ROOM_BUCKET).upload(dp, blob, { contentType:'image/jpeg', upsert:false });
+        if (!tryUp.error){ bk = ROOM_BUCKET; path = dp; } }
+      if (bk === PH_BUCKET){ const up = await db.storage.from(PH_BUCKET).upload(path, blob, { contentType:'image/jpeg', upsert:false }); if (up.error) throw up.error; }
+      let { error } = await db.rpc('ws_add_photo', { p_order: o.id, p_path: path, p_kind: kind || 'done' });
+      if (error && bk === ROOM_BUCKET){   // the database isn't on update-32 yet: keep it private like before
+        await db.storage.from(ROOM_BUCKET).remove([path]); bk = PH_BUCKET; path = `${o.id}/${Date.now()}.jpg`;
+        const up = await db.storage.from(PH_BUCKET).upload(path, blob, { contentType:'image/jpeg', upsert:false }); if (up.error) throw up.error;
+        ({ error } = await db.rpc('ws_add_photo', { p_order: o.id, p_path: path, p_kind: kind || 'done' })); }
+      if (error){ await db.storage.from(bk).remove([path]); throw error; }
       if (!quiet){ toast(kind === 'ref' ? `Picture added to ${o.ref}. Workers will see it.` : `Photo added to ${o.ref}`); loadPhotos(o.id); }
       return true;
     } catch(e){ $('#phUp')?.remove(); toast(/bucket|not found/i.test(errMsg(e)) ? 'Run update-12-all.sql in Supabase to turn on photos.' : /ws_add_photo/.test(errMsg(e)) ? 'Run update-14-order-pictures.sql in Supabase first.' : errMsg(e)); return false; }
@@ -1280,6 +1310,7 @@
       <label class="field"><span>Deadline</span><input id="fDate" type="date" value="${iso}"></label>
       <label class="field"><span>Note for the workshop (optional)</span><textarea id="fNote" rows="2" placeholder="e.g. Black frames, red seats. Customer collects.">${esc(pre.notes || '')}</textarea></label>
       <div class="field"><span>🧵 Fabric &amp; colour</span>${fabricPicker('fFab', null)}</div>
+      ${extraLines('fLines', [])}
       <div class="field"><span>How urgent</span><div class="seg-pick" id="fUrg">
         <button type="button" data-u="normal" class="on">Normal</button><button type="button" data-u="high">High</button><button type="button" data-u="urgent">Urgent</button></div></div>
       <div class="field"><span>📐 Pictures of what to make (optional)</span>
@@ -1289,7 +1320,7 @@
       ${S.pay !== null ? `<label class="hold-pick"><input type="checkbox" id="fHold" checked> <span><b>Wait for the half payment</b><small>The workshop starts after you confirm the deposit. Untick if they paid already or don't need to.</small></span></label>` : ''}
       <p id="fErr" style="color:var(--red);min-height:20px;font-size:13px"></p>
       <div class="actions"><button class="btn line" data-x>Cancel</button><button class="btn" id="fSave">Add to workshop</button></div>`);
-    let urg = 'normal'; bindStepPeople(s); const getFab = bindFabricPicker(s, 'fFab');
+    let urg = 'normal'; bindStepPeople(s); const getFab = bindFabricPicker(s, 'fFab'), getExtra = bindExtraLines(s, 'fLines');
     const pics = []; const pg = s.querySelector('#fPicsGrid');
     const drawPics = () => { pg.innerHTML = pics.map((f, i) => `<div class="ph"><img src="${URL.createObjectURL(f)}" alt=""><button type="button" class="ph-rm" data-fpx="${i}">✕</button></div>`).join(''); };
     s.querySelector('#fPics').onchange = e => { pics.push(...[...e.target.files].filter(f => /^image\//.test(f.type))); e.target.value = ''; drawPics(); };
@@ -1304,12 +1335,14 @@
       const { stages, people, together } = readStepPeople(s);
       if (!customer || !item || qty < 1) return s.querySelector('#fErr').textContent = 'Fill in the customer, what, and how many.';
       if (!stages.length) return s.querySelector('#fErr').textContent = 'Pick at least one step.';
+      const extra = getExtra(); if (typeof extra === 'string') return s.querySelector('#fErr').textContent = extra;
       const btn = s.querySelector('#fSave'); btn.disabled = true; btn.textContent = 'Adding…';
       const { data, error } = await db.rpc('ws_create_order', { p: { customer, item, qty, deadline: s.querySelector('#fDate').value || null, urgency: urg, stages, people, together, notes: s.querySelector('#fNote').value.trim(), request_id: pre.req ? pre.req.id : null } });
       if (error){ btn.disabled = false; btn.textContent = 'Add to workshop'; s.querySelector('#fErr').textContent = errMsg(error); return; }
       const hb = s.querySelector('#fHold'), noWait = hb && !hb.checked, fid = getFab();
-      if (pics.length || noWait || fid){ btn.textContent = pics.length ? 'Adding pictures…' : 'Adding…'; await load(); const no = S.orders.find(x => x.ref === data);
-        if (no && fid) await db.rpc('kt_set_order_fabric', { p_order: no.id, p_fabric: fid });
+      if (pics.length || noWait || fid || extra.length){ btn.textContent = pics.length ? 'Adding pictures…' : 'Adding…'; await load(); const no = S.orders.find(x => x.ref === data);
+        if (no && extra.length){ const r = await db.rpc('kt_set_order_lines', { p_order: no.id, p_lines: [{ item, qty, fabric_id: fid }].concat(extra) }); if (r.error) toast(errMsg(r.error)); }
+        else if (no && fid) await db.rpc('kt_set_order_fabric', { p_order: no.id, p_fabric: fid });
         if (no && noWait) await db.rpc('ws_hold', { p_order: no.id, p_hold: false });
         if (no) for (const f of pics) await addPhoto(no, f, 'ref', true); }
       closeModal(); tab = 'orders'; await load();
@@ -1334,12 +1367,13 @@
       <p class="sub" style="margin-top:-6px">Fix anything that was typed wrong. The workshop sees the change straight away.</p>
       <label class="field"><span>Customer</span><input id="eCust" value="${esc(o.customer)}" autocomplete="off"></label>
       <div class="row2">
-        <label class="field"><span>What</span><input id="eItem" value="${esc(o.item)}" autocomplete="off"></label>
-        <label class="field"><span>How many</span><input id="eQty" type="number" min="1" value="${o.qty}"></label>
+        <label class="field"><span>What</span><input id="eItem" value="${esc(o.lines ? o.lines[0].item : o.item)}" autocomplete="off"></label>
+        <label class="field"><span>How many</span><input id="eQty" type="number" min="1" value="${o.lines ? o.lines[0].qty : o.qty}"></label>
       </div>
       <label class="field"><span>Deadline</span><input id="eDate" type="date" value="${o.dl}"></label>
       <label class="field"><span>Note for the workshop</span><textarea id="eNote" rows="2">${esc(o.notes || '')}</textarea></label>
-      <div class="field"><span>🧵 Fabric &amp; colour</span>${fabricPicker('eFab', o.fabricId)}${o.fabric && !o.fabricId ? `<small class="hint-sm">Now: ${esc(o.fabric)}</small>` : ''}</div>
+      <div class="field"><span>🧵 Fabric &amp; colour</span>${fabricPicker('eFab', o.lines ? o.lines[0].fabric_id : o.fabricId)}${o.fabric && !o.fabricId ? `<small class="hint-sm">Now: ${esc(o.fabric)}</small>` : ''}</div>
+      ${extraLines('eLines', o.lines ? o.lines.slice(1) : [])}
       <div class="field"><span>How urgent</span><div class="seg-pick" id="eUrg">
         ${['normal','high','urgent'].map(u => `<button type="button" data-u="${u}" class="${o.urgency === u ? 'on' : ''}">${URG_NAME[u]}</button>`).join('')}</div></div>
       <div class="field"><span>Steps and who does them</span>${stepPeople(o.stages, Object.fromEntries(ts.map(t => [t.stage, t.planned])), lock, ts.filter(t => t.withPrev).map(t => t.stage))}
@@ -1349,7 +1383,7 @@
         <button class="btn red line" id="eDel">🗑 Delete order</button>
         <span style="display:flex;gap:10px"><button class="btn line" data-x>Cancel</button><button class="btn" id="eSave">Save changes</button></span>
       </div>`);
-    let urg = o.urgency; bindStepPeople(s); const getFab = bindFabricPicker(s, 'eFab');
+    let urg = o.urgency; bindStepPeople(s); const getFab = bindFabricPicker(s, 'eFab'), getExtra = bindExtraLines(s, 'eLines');
     s.querySelector('#eUrg').addEventListener('click', e => { const b = e.target.closest('[data-u]'); if (!b) return; urg = b.dataset.u; s.querySelectorAll('#eUrg button').forEach(x => x.classList.toggle('on', x === b)); });
     s.querySelector('#eSave').onclick = async () => {
       const customer = s.querySelector('#eCust').value.trim(), item = s.querySelector('#eItem').value.trim();
@@ -1357,10 +1391,14 @@
       const { stages, people, together } = readStepPeople(s);
       if (!customer || !item || qty < 1) return s.querySelector('#eErr').textContent = 'Fill in the customer, what, and how many.';
       if (!stages.length) return s.querySelector('#eErr').textContent = 'Pick at least one step.';
+      const extra = getExtra(); if (typeof extra === 'string') return s.querySelector('#eErr').textContent = extra;
       const btn = s.querySelector('#eSave'); btn.disabled = true; btn.textContent = 'Saving…';
       const { error } = await db.rpc('ws_edit_order', { p: { id: o.id, customer, item, qty, deadline: s.querySelector('#eDate').value || null, urgency: urg, stages, people, together, notes: s.querySelector('#eNote').value.trim() } });
       if (error){ btn.disabled = false; btn.textContent = 'Save changes'; s.querySelector('#eErr').textContent = /ws_edit_order/.test(errMsg(error)) ? 'Run update-9-edit-orders.sql in Supabase first.' : errMsg(error); return; }
-      const fid = getFab(); if (S.fabs && (fid || null) !== (o.fabricId || null)) await db.rpc('kt_set_order_fabric', { p_order: o.id, p_fabric: fid });
+      const fid = getFab();
+      if (S.hasLines && (extra.length || o.lines)){ const r = await db.rpc('kt_set_order_lines', { p_order: o.id, p_lines: [{ item, qty, fabric_id: fid }].concat(extra) });
+        if (r.error){ btn.disabled = false; btn.textContent = 'Save changes'; s.querySelector('#eErr').textContent = errMsg(r.error); return; } }
+      else if (S.fabs && (fid || null) !== (o.fabricId || null)) await db.rpc('kt_set_order_fabric', { p_order: o.id, p_fabric: fid });
       closeModal(); toast(`${o.ref} updated`); await load(); orderModal(o.id);
     };
     const del = s.querySelector('#eDel'); let sure = false;
@@ -1484,7 +1522,7 @@
   // the invoice: lines with prices (owner only)
   function invoiceModal(o){
     const inv = invOf(o), paid = paidOf(inv);
-    const lines = inv ? inv.items.map(x => ({ desc:x.desc, qty:x.qty, price:x.price })) : [{ desc: o.item + (o.notes ? ' (' + String(o.notes).replace(/Phone:\s*\S+/i, '').trim().slice(0, 80) + ')' : '').replace(/\(\s*\)/, ''), qty: o.qty, price: '' }];
+    const lines = inv ? inv.items.map(x => ({ desc:x.desc, qty:x.qty, price:x.price })) : o.lines ? o.lines.map(l => ({ desc: l.item + (l.fabric ? ` (${l.fabric})` : ''), qty: l.qty, price: '' })) : [{ desc: o.item + (o.notes ? ' (' + String(o.notes).replace(/Phone:\s*\S+/i, '').trim().slice(0, 80) + ')' : '').replace(/\(\s*\)/, ''), qty: o.qty, price: '' }];
     const lineRow = (x, i) => `<div class="mo-line" data-i="${i}"><input class="mo-d" placeholder="What (e.g. Bar stools, chrome legs)" value="${esc(x.desc)}"><input class="mo-q" type="number" min="1" step="1" inputmode="numeric" value="${esc(x.qty)}" aria-label="Quantity"><input class="mo-p" type="number" min="0" step="1" inputmode="decimal" placeholder="Price each" value="${esc(x.price)}" aria-label="Price each"><button type="button" class="mo-x" aria-label="Remove line">✕</button></div>`;
     const s = openModal(`<h3>🧾 ${inv ? 'Edit invoice ' + esc(inv.no) : 'Make invoice'} · ${o.ref}</h3>
       <p class="sub">${esc(o.customer)}. Only you see prices.</p>
@@ -1598,7 +1636,8 @@
     const ts = S.tasks.filter(t => t.order === o.id).sort((a, b) => a.step - b.step);
     const cur = ts.find(t => t.status !== 'done');
     const steps = ts.map(t => ({ name: (ALL_STEPS.find(s => s.id === t.stage) || { name: t.stage }).name, state: t.status === 'done' ? 'done' : t === cur ? 'now' : 'todo' }));
-    const items = inv && inv.items ? inv.items.map(it => ({ desc: it.desc, qty: it.qty })) : null;
+    const items = inv && inv.items ? inv.items.map(it => ({ desc: it.desc, qty: it.qty }))
+      : o.lines ? o.lines.map(l => ({ desc: l.item + (l.fabric ? ` (${l.fabric})` : ''), qty: l.qty })) : null;
     return { biz: S.money ? S.money.biz : {}, o: Object.assign({}, o, { phone: (inv && inv.phone) || phoneOf(o) }), items, steps,
       link: o.room ? roomLink(o) : null, deliveredOn: o.deliveredAt || null };
   }
@@ -1671,7 +1710,8 @@
       ${o.by === 'manager' ? `<p style="margin:4px 0;font-size:13px;color:var(--muted)">👤 Taken by the manager on the workshop screen</p>` : ''}
       ${o.srcNo ? `<p style="margin:4px 0;font-size:13px;color:var(--muted)">🌐 Website order ${esc(o.srcNo)} · the customer sees these steps live on their tracking page</p>` : ''}
       ${o.notes ? `<p style="margin:6px 0;padding:10px 12px;background:#fff;border:1px solid var(--line);border-radius:6px">📝 ${esc(o.notes)}</p>` : ''}
-      ${o.fabric ? `<p class="o-fab">🧵 Fabric: ${fsw(o.fabricHex)}<b>${esc(o.fabric)}</b></p>` : ''}
+      ${o.lines ? linesHtml(o) : ''}
+      ${o.fabric ? (() => { const ff = fabOf(o); return `<p class="o-fab">${ff && ff.photo ? `<a href="${esc(ff.photo)}" target="_blank" rel="noopener"><img class="o-fab-ph" src="${esc(ff.photo)}" alt=""></a>` : fsw(o.fabricHex)}<span>🧵 Fabric:<br><b>${esc(o.fabric)}</b></span></p>`; })() : ''}
       <p class="${!p.finished && isLate(o.deadline) ? 'due late' : ''}" style="text-align:left">Deadline: ${fmtDay(o.deadline)}</p>
       ${!o.delivered ? `<div class="dl-line">🚚 ${o.delOn ? `Delivery <b>${esc(dayName(o.delOn))}</b>${o.delPlace ? ' · ' + esc(o.delPlace) : ''}${o.delNote ? ` <small>(${esc(o.delNote)})</small>` : ''}` : 'No delivery day yet'} <button class="btn sm line" data-dplan="${o.id}">${o.delOn ? 'Move' : 'Plan delivery'}</button></div>` : ''}
       ${payBox(o)}
@@ -1854,15 +1894,48 @@
   const shopPath = u => { const m = String(u || '').match(/\/shop-photos\/(.+)$/); return m ? decodeURIComponent(m[1]) : null; };
   /* ---------- FABRICS: the list of fabrics and colours, with metres in the store ---------- */
   const fabName = f => `${f.kind} · ${f.colour}`;
-  const fsw = (hex, big) => `<i class="fab-sw ${big ? 'big' : ''}" style="background:${esc(hex || '#888')}"></i>`;
+  // the little colour dot; when the fabric has a photo, the dot shows the photo instead
+  const fsw = (hex, big, photo) => `<i class="fab-sw ${big ? 'big' : ''} ${photo ? 'ph' : ''}" style="background:${esc(hex || '#888')}${photo ? ` url('${esc(photo)}') center/cover` : ''}"></i>`;
+  const fabOf = o => (S.fabs || []).find(f => f.id === o.fabricId);
   // a row of tappable fabric chips; returns html. The chosen one has class "on" and data-fid
   function fabricPicker(id, selected){
     if (!S.fabs) return `<p class="hint-sm">Run <b>update-29-fabrics.sql</b> in Supabase to pick fabrics.</p>`;
-    return `<div class="fab-pick" id="${id}"><button type="button" class="fab-c ${selected ? '' : 'on'}" data-fid="">No fabric</button>${S.fabs.map(f => `<button type="button" class="fab-c ${selected === f.id ? 'on' : ''}" data-fid="${f.id}">${fsw(f.hex)}${esc(fabName(f))}${+f.metres <= +f.low_at ? ' <small>(low)</small>' : ''}</button>`).join('')}</div>`;
+    return `<div class="fab-pick" id="${id}"><button type="button" class="fab-c ${selected ? '' : 'on'}" data-fid="">No fabric</button>${S.fabs.map(f => `<button type="button" class="fab-c ${selected === f.id ? 'on' : ''}" data-fid="${f.id}">${fsw(f.hex, false, f.photo)}${esc(fabName(f))}${+f.metres <= +f.low_at ? ' <small>(low)</small>' : ''}</button>`).join('')}</div>`;
   }
   function bindFabricPicker(root, id){ const el = root.querySelector('#' + id); if (!el) return () => null;
     el.addEventListener('click', e => { const b = e.target.closest('[data-fid]'); if (!b) return; el.querySelectorAll('.fab-c').forEach(x => x.classList.toggle('on', x === b)); });
     return () => { const on = el.querySelector('.fab-c.on'); return on && on.dataset.fid ? on.dataset.fid : null; }; }
+  /* ---------- several items in one order (update-31) ---------- */
+  let olSeq = 0;
+  const olRow = (l, n) => { const k = ++olSeq; return `<div class="ol-row" data-k="${k}">
+      <div class="ol-head"><b>Item <span class="ol-n">${n}</span></b><button type="button" class="ol-rm" data-olrm aria-label="Remove this item">✕ Remove</button></div>
+      <div class="row2"><label class="field"><span>What</span><input class="ol-item" placeholder="e.g. Bar stools" autocomplete="off" value="${esc(l.item || '')}"></label>
+        <label class="field"><span>How many</span><input class="ol-qty" type="number" min="1" value="${esc(l.qty || 1)}"></label></div>
+      ${S.fabs ? `<div class="field"><span>🧵 Fabric &amp; colour</span>${fabricPicker('olf' + k, l.fabric_id || null)}</div>` : ''}</div>`; };
+  // the extra items under the first one; returns html
+  const extraLines = (id, lines) => !S.hasLines ? '' : `<div class="ol-box" id="${id}">${(lines || []).map((l, i) => olRow(l, i + 2)).join('')}</div>
+      <button type="button" class="btn sm line ol-add" data-oladd="${id}">➕ Add another item <small>(same order, e.g. a different colour)</small></button>`;
+  function bindExtraLines(root, id){
+    const box = root.querySelector('#' + id); if (!box) return () => [];
+    const renum = () => box.querySelectorAll('.ol-n').forEach((x, i) => x.textContent = i + 2);
+    root.querySelector(`[data-oladd="${id}"]`).onclick = () => { box.insertAdjacentHTML('beforeend', olRow({ qty:1 }, box.children.length + 2)); box.lastElementChild.querySelector('.ol-item').focus(); };
+    box.addEventListener('click', e => {
+      if (e.target.closest('[data-olrm]')){ e.target.closest('.ol-row').remove(); renum(); return; }
+      const c = e.target.closest('.fab-c'); if (c){ c.parentNode.querySelectorAll('.fab-c').forEach(x => x.classList.toggle('on', x === c)); } });
+    // returns the filled-in rows, or a string when something is missing
+    return () => { const out = [];
+      for (const r of box.querySelectorAll('.ol-row')){ const item = r.querySelector('.ol-item').value.trim(), qty = parseInt(r.querySelector('.ol-qty').value, 10) || 0;
+        const on = r.querySelector('.fab-c.on'); if (!item) continue;
+        if (qty < 1) return `How many ${item}?`;
+        out.push({ item, qty, fabric_id: on && on.dataset.fid ? on.dataset.fid : null }); }
+      return out; };
+  }
+  const lineTxt = l => `${l.qty} × ${l.item}`;
+  function linesHtml(o){
+    return `<div class="o-lines"><b class="o-lines-t">${o.lines.length} items in this order</b>${o.lines.map(l => { const ff = (S.fabs || []).find(f => f.id === l.fabric_id);
+      return `<div class="o-line"><span class="o-line-q">${l.qty} ×</span><span class="o-line-i">${esc(l.item)}</span>${l.fabric ? `<span class="o-line-f">${fsw(l.hex, false, ff && ff.photo)}${esc(l.fabric)}</span>` : '<span class="o-line-f muted">No fabric</span>'}</div>`; }).join('')}</div>`;
+  }
+
   function viewFabrics(){
     if (!S.fabs) return `${stockToggle()}<div class="d-head anim"><div><h1>Fabrics</h1></div></div><div class="card"><p>Run <b>update-29-fabrics.sql</b> in Supabase to keep a list of fabrics and colours.</p></div>`;
     const low = S.fabs.filter(f => +f.metres <= +f.low_at);
@@ -1872,7 +1945,7 @@
         <span class="st-btns"><button class="btn" data-fabric="">+ Add fabric</button></span></div>
       ${low.length ? `<p class="sp-note anim" style="--i:1">⚠ Running low: ${low.map(f => `<b>${esc(fabName(f))}</b> (${+(+f.metres).toFixed(1)} m)`).join(', ')}</p>` : ''}
       ${kinds.map((k, ki) => `<h3 class="fab-kind anim" style="--i:${ki + 2}">${esc(k)}</h3><div class="fab-grid">${S.fabs.filter(f => f.kind === k).map(f => `<button class="fab-card anim ${+f.metres <= +f.low_at ? 'low' : ''}" style="--i:${ki + 2}" data-fabric="${f.id}">
-          ${fsw(f.hex, true)}<span><b>${esc(f.colour)}</b><small>${+(+f.metres).toFixed(1)} m in store${+f.metres <= +f.low_at ? ' · low' : ''}</small></span></button>`).join('')}</div>`).join('')
+          ${fsw(f.hex, true, f.photo)}<span><b>${esc(f.colour)}</b><small>${+(+f.metres).toFixed(1)} m in store${+f.metres <= +f.low_at ? ' · low' : ''}</small></span></button>`).join('')}</div>`).join('')
         || '<p class="empty">No fabrics yet. Tap + Add fabric.</p>'}`;
   }
   function fabricModal(id){
@@ -1882,6 +1955,7 @@
     const s = openModal(`<h2>${id ? esc(fabName(f)) : 'Add a fabric'}</h2>
       <div class="row2"><label class="field"><span>Type of fabric</span><input id="fbKind" list="fbKinds" maxlength="60" value="${esc(f.kind)}" placeholder="e.g. Leatherette"><datalist id="fbKinds">${kinds.map(k => `<option value="${esc(k)}">`).join('')}</datalist></label>
         <label class="field"><span>Colour</span><input id="fbCol" maxlength="60" value="${esc(f.colour)}" placeholder="e.g. Red"></label></div>
+      <div class="field"><span>Photo of the fabric <em>(optional)</em></span><div class="fab-photo" id="fbPh"></div><input type="file" id="fbFile" accept="image/*" hidden></div>
       <div class="field"><span>Colour swatch</span><div class="fab-hex"><input type="color" id="fbHex" value="${esc(f.hex)}"><small>Tap to pick the colour that looks closest</small></div></div>
       <div class="row2"><label class="field"><span>Metres in the store</span><input id="fbM" type="number" min="0" step="0.5" inputmode="decimal" value="${+(+f.metres).toFixed(1)}"></label>
         <label class="field"><span>Warn me below (metres)</span><input id="fbLow" type="number" min="0" step="1" inputmode="decimal" value="${+f.low_at}"></label></div>
@@ -1889,12 +1963,36 @@
       <p id="fbErr" style="color:var(--red);min-height:18px;font-size:13px"></p>
       <div class="actions" style="justify-content:space-between">${id ? '<button class="btn red line" id="fbOff">Remove from list</button>' : '<span></span>'}
         <span style="display:flex;gap:10px"><button class="btn line" data-x>Cancel</button><button class="btn" id="fbSave">${id ? 'Save' : 'Add fabric'}</button></span></div>`);
+    let photo = f.photo || null, upl = null; const newPics = [];
+    const drawPh = () => { s.querySelector('#fbPh').innerHTML = upl ? '<div class="fab-ph-add"><b>…</b>Uploading</div>'
+      : photo ? `<img src="${esc(photo)}" alt=""><span class="fab-ph-btns"><button type="button" class="btn sm line" data-fbpick>Change photo</button><button type="button" class="btn sm line red" data-fbdel>Remove photo</button></span>`
+      : `<button type="button" class="fab-ph-add" data-fbpick><b>📷</b>Add a photo<small>gallery or camera</small></button>`; };
+    drawPh();
+    s.querySelector('#fbPh').addEventListener('click', e => {
+      if (e.target.closest('[data-fbpick]')) return s.querySelector('#fbFile').click();
+      if (e.target.closest('[data-fbdel]')){ photo = null; drawPh(); } });
+    s.querySelector('#fbFile').addEventListener('change', async e => {
+      const file = e.target.files[0]; e.target.value = ''; if (!file) return;
+      upl = true; drawPh();
+      try {
+        if (!db.storage) throw new Error('Photos need the real Supabase');
+        const blob = await shrink(file), path = `fabric/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+        const up = await db.storage.from(SHOP_BUCKET).upload(path, blob, { contentType:'image/jpeg', upsert:false });
+        if (up.error) throw up.error;
+        photo = db.storage.from(SHOP_BUCKET).getPublicUrl(path).data.publicUrl; newPics.push(photo);
+      } catch (er){ toast(/bucket|not found/i.test(errMsg(er)) ? 'Run update-26-shop-products.sql in Supabase to turn on photos.' : errMsg(er)); }
+      upl = null; drawPh(); });
+    const dropPhotos = list => { const p = list.map(shopPath).filter(Boolean); if (p.length && db.storage) db.storage.from(SHOP_BUCKET).remove(p).catch(() => {}); };
     s.querySelectorAll('[data-fm]').forEach(b => b.onclick = () => { const m = s.querySelector('#fbM'); m.value = Math.max(0, (parseFloat(m.value) || 0) + Number(b.dataset.fm)); });
     const save = async extra => {
       const body = Object.assign({ id: id || null, kind: s.querySelector('#fbKind').value, colour: s.querySelector('#fbCol').value, hex: s.querySelector('#fbHex').value,
         metres: parseFloat(s.querySelector('#fbM').value) || 0, low_at: parseFloat(s.querySelector('#fbLow').value) || 0 }, extra || {});
+      if (upl) return s.querySelector('#fbErr').textContent = 'Wait for the photo to finish uploading';
+      if (photo || f.photo) body.photo = photo || '';
       const { error } = await db.rpc('kt_save_fabric', { p: body });
       if (error) return s.querySelector('#fbErr').textContent = errMsg(error);
+      if (f.photo && f.photo !== photo) dropPhotos([f.photo]);                 // the old photo she replaced
+      dropPhotos(newPics.filter(u => u !== photo));                             // uploads she changed her mind on
       closeModal(); toast(extra ? `${fabName(f)} removed from the list` : `${body.kind} · ${body.colour} saved`); await load(); };
     s.querySelector('#fbSave').onclick = () => save();
     const off = s.querySelector('#fbOff'); let sure = false;
@@ -1933,7 +2031,7 @@
       <label class="field"><span>Where it's used</span><input id="spSpace" maxlength="80" value="${esc(d.space || '')}" placeholder="e.g. Bars & cafés"></label>
       <label class="field"><span>Material</span><input id="spMat" maxlength="160" value="${esc(d.material || '')}" placeholder="e.g. Steel frame, leatherette seat"></label>
       <label class="field"><span>About this piece</span><textarea id="spAbout" rows="3" maxlength="1500" placeholder="What it is, sizes, colours you can make it in…">${esc(d.about || '')}</textarea></label>
-      ${S.fabs && S.fabs.length ? `<div class="field"><span>Colours customers can choose <em>(tap to tick)</em></span><div class="fab-pick multi" id="spFab">${S.fabs.map(f => `<button type="button" class="fab-c ${(d.finishes || []).some(x => x.name === fabName(f)) ? 'on' : ''}" data-fname="${esc(fabName(f))}" data-fhex="${esc(f.hex)}">${fsw(f.hex)}${esc(fabName(f))}</button>`).join('')}</div></div>` : ''}
+      ${S.fabs && S.fabs.length ? `<div class="field"><span>Colours customers can choose <em>(tap to tick)</em></span><div class="fab-pick multi" id="spFab">${S.fabs.map(f => `<button type="button" class="fab-c ${(d.finishes || []).some(x => x.name === fabName(f)) ? 'on' : ''}" data-fname="${esc(fabName(f))}" data-fhex="${esc(f.hex)}">${fsw(f.hex, false, f.photo)}${esc(fabName(f))}</button>`).join('')}</div></div>` : ''}
       <label class="field"><span>Availability</span><input id="spAv" maxlength="60" value="${esc(d.availability || '')}" placeholder="In stock, or Made to order"></label>
       <label class="sp-show"><input type="checkbox" id="spActive" ${d.active ? 'checked' : ''}> Show on the website</label>
       <div class="sp-act">
