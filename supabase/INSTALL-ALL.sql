@@ -1,7 +1,7 @@
 -- =====================================================================
 --  KARTECH WORKSHOP: INSTALL EVERYTHING (brand-new Supabase project)
 --  This is every database file, in the right order, in one file:
---  00-website-basics → setup-workshop → update-1 … update-26.
+--  00-website-basics → setup-workshop → update-1 … update-27.
 --
 --  Use it for a NEW project, or to bring an existing project fully up
 --  to date. Paste ALL of it into Supabase → SQL Editor → New query → Run.
@@ -4675,3 +4675,34 @@ insert into public.kt_products (id,name,price,images,tags,space,material,finishe
 ('cooker-griddle','Gas Cooker with Griddle',null,array[]::text[],array['Catering equipment']::text[],'Commercial kitchens','Stainless steel','[{"name":"Stainless steel","color":"#C9CBC8"}]'::jsonb,null,'Burners and a flat griddle in one unit. [Real description — to confirm]','[Width × depth × height — to confirm]','[Steel grade and burner type — to confirm]','[Care instructions — to confirm with Kartech]','Delivery across Kenya. Cost and timing confirmed with your order.',33),
 ('stockpot-burner','Single Stock Pot Burner',null,array[]::text[],array['Catering equipment']::text[],'Commercial kitchens','Stainless steel','[{"name":"Stainless steel","color":"#C9CBC8"}]'::jsonb,null,'A low, heavy burner for large cooking pots. [Real description — to confirm]','[Width × depth × height — to confirm]','[Steel grade and burner type — to confirm]','[Care instructions — to confirm with Kartech]','Delivery across Kenya. Cost and timing confirmed with your order.',34)
 on conflict (id) do nothing;
+
+
+-- #####################################################################
+-- ##  FILE: update-27-relink-invoices.sql
+-- #####################################################################
+
+-- =====================================================================
+--  UPDATE 27: an order brought back from the Bin gets its invoice back
+--  When an order was deleted, its invoice stayed in Finance (on purpose)
+--  but lost its link to the order. Bringing the order back from the Bin
+--  did not reconnect them, so the order showed "No invoice yet".
+--  • Reconnects every invoice that lost its order, by order number.
+--  • From now on, an order coming back reconnects its invoice by itself.
+--  Paste ALL of this into Supabase → SQL Editor → New query → Run.
+--  Safe to run again.
+-- =====================================================================
+update public.kt_invoices i set order_id = o.id
+  from public.ws_orders o
+ where i.order_id is null and i.order_ref is not null and i.order_ref = o.ref;
+
+create or replace function public.kt_relink_invoices() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  update public.kt_invoices set order_id = new.id where order_id is null and order_ref = new.ref;
+  return null;
+end $$;
+revoke all on function public.kt_relink_invoices() from public, anon, authenticated;
+
+drop trigger if exists kt_relink_invoices on public.ws_orders;
+create trigger kt_relink_invoices after insert on public.ws_orders
+  for each row execute function public.kt_relink_invoices();

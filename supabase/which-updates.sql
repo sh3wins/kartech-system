@@ -32,6 +32,7 @@ from (values
   (23, 'update-23-invoices-receipts.sql', 'UPDATE 23: invoices and official receipts (with amounts)', to_regclass('public.kt_invoices') is not null),
   (24, 'update-24-manager-done.sql', 'UPDATE 24: the manager can mark a worker''s job done', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'ws_foreman_done')),
   (25, 'update-25-lock-helpers.sql', 'UPDATE 25: close three small side doors (found by check-security.sql)', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'ws_task_names') and not has_function_privilege('anon', 'public.ws_task_names(uuid)', 'execute')),
-  (26, 'update-26-shop-products.sql', 'UPDATE 26: the owner runs the website shop from her app', to_regclass('public.kt_products') is not null)
+  (26, 'update-26-shop-products.sql', 'UPDATE 26: the owner runs the website shop from her app', to_regclass('public.kt_products') is not null),
+  (27, 'update-27-relink-invoices.sql', 'UPDATE 27: an order brought back from the Bin gets its invoice back', exists (select 1 from pg_trigger where tgname = 'kt_relink_invoices'))
 ) v(nr, file, about, ok)
 order by nr;

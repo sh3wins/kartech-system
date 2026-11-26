@@ -51,3 +51,9 @@
 .o-del:hover{ border-color:var(--c-late,#E5484D) }
 .o-del.sure{ background:var(--c-late,#E5484D); border-color:var(--c-late,#E5484D); color:#fff; font-size:13px; font-weight:700 }
 @media (max-width:900px){ .o-del{ top:14px; transform:none } }
+
+/* receipts list inside an order */
+.mo-rt{ margin:14px 0 6px; font-weight:700; font-size:14px }
+.mo-rt.none{ font-weight:400; color:var(--muted); font-size:13.5px }
+.kf-btns{ display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end }
+.mo-rcbtn{ background:var(--gold,#B08A4F) !important; color:#1F1A10 !important; border-color:transparent !important }

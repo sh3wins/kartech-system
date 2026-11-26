@@ -1399,12 +1399,14 @@
         <div><small>Balance</small><b class="${bal > 0 ? 'w' : 'g'}">${bal > 0 ? KSH(bal) : '✓ Fully paid'}</b></div>
       </div>
       <div class="mo-acts">
-        ${bal > 0 ? `<button class="btn sm" data-mpay="${o.id}">＋ Record payment</button>` : ''}
+        ${bal > 0 ? `<button class="btn sm mo-rcbtn" data-mpay="${o.id}">🧾 Got paid? Make receipt</button>` : ''}
         <button class="btn sm ${bal > 0 ? 'line' : ''}" data-msendinv="${inv.id}">📤 ${inv.sent_at ? 'Send invoice again' : 'Send invoice PDF'}</button>
+        <button class="btn sm line" data-mviewinv="${inv.id}">👁 See invoice</button>
         <button class="btn sm line" data-minv="${o.id}">✏️ Edit invoice</button>
       </div>
-      ${pays.length ? `<div class="mo-rcpts">${pays.map((p, i) => `<div class="mo-r"><span><b>${esc(p.no)} · ${KSH(p.amount)}</b><em>${esc(p.method)}${p.reference ? ' · ' + esc(p.reference) : ''}</em><small>${dShort(p.created_at)}${p.sent_at ? ' · sent ✓' : ''}</small></span>
-          <button class="btn sm ${p.sent_at ? 'line' : ''}" data-msendr="${p.id}">📤 ${p.sent_at ? 'Again' : 'Send receipt'}</button>
+      ${!pays.length ? `<p class="mo-rt none">🧾 No receipts yet. When the client pays, tap <b>Got paid? Make receipt</b>: type the amount and the M-Pesa code, and the receipt is made and ready to send.</p>` : ''}
+      ${pays.length ? `<p class="mo-rt">🧾 Receipts · ${pays.length}</p><div class="mo-rcpts">${pays.map((p, i) => `<div class="mo-r"><span><b>${esc(p.no)} · ${KSH(p.amount)}</b><em>${esc(p.method)}${p.reference ? ' · ' + esc(p.reference) : ''}</em><small>${dShort(p.created_at)}${p.sent_at ? ' · sent ✓' : ''}</small></span>
+          <button class="btn sm line" data-mviewr="${p.id}">👁 See</button><button class="btn sm ${p.sent_at ? 'line' : ''}" data-msendr="${p.id}">📤 ${p.sent_at ? 'Again' : 'Send receipt'}</button>
           ${i === pays.length - 1 && new Date(p.created_at).toDateString() === new Date().toDateString() && !o.delivered ? `<button class="link-sm" data-mcancel="${p.id}">Cancel</button>` : ''}</div>`).join('')}</div>` : ''}
     </div>`;
   }
@@ -1448,7 +1450,7 @@
   function payModal(o, refPrefill){
     const inv = invOf(o); if (!inv) return invoiceModal(o);
     const bal = Number(inv.total) - paidOf(inv), half = Math.round(Number(inv.total) / 2);
-    const s = openModal(`<h3>＋ Record payment · ${o.ref}</h3>
+    const s = openModal(`<h3>🧾 Make receipt · ${o.ref}</h3>
       <p class="sub">${esc(o.customer)} · Invoice ${esc(inv.no)} · Balance <b>${KSH(bal)}</b></p>
       <label class="field"><span>Amount received (KSh)</span><input id="mpAmt" type="number" min="1" step="1" inputmode="decimal" max="${bal}"></label>
       <div class="mo-quick">${!paysOf(inv).length && half < bal ? `<button type="button" class="btn sm line" data-amt="${half}">Half · ${KSH(half)}</button>` : ''}<button type="button" class="btn sm line" data-amt="${bal}">All the balance · ${KSH(bal)}</button></div>
@@ -1557,7 +1559,7 @@
         <div class="kf-stat warn"><small>Still owed</small><strong class="kf-money">${KSH(owed)}</strong><span>${open.length} invoice${open.length === 1 ? '' : 's'}</span></div>
         <div class="kf-stat"><small>Receipts made</small><strong>${S.money.pays.length}</strong></div></div>
       <section class="kf-panel"><div class="kf-title"><h2>Waiting for money</h2><span>${open.length}</span></div>${open.map(row).join('') || '<p class="kf-empty">Nobody owes anything. ✓</p>'}</section>
-      <section class="kf-panel"><div class="kf-title"><h2>Latest receipts</h2></div>${recent.map(p => { const i = S.money.inv.find(x => x.id === p.invoice_id); return `<div class="kf-row kf-rc"><span><b>${esc(p.no)} · ${KSH(p.amount)}</b><small>${esc(i ? (i.order_ref || '') + ' · ' + firstName(i.customer) : '')} · ${esc(p.method)}${p.reference ? ' ' + esc(p.reference) : ''} · ${dShort(p.created_at)}</small></span><button class="btn sm ${p.sent_at ? 'line' : ''}" data-msendr="${p.id}">📤 ${p.sent_at ? 'Again' : 'Send'}</button></div>`; }).join('') || '<p class="kf-empty">No receipts yet. Open an order → Invoice & payments → Record payment.</p>'}</section>
+      <section class="kf-panel"><div class="kf-title"><h2>Latest receipts</h2></div>${recent.map(p => { const i = S.money.inv.find(x => x.id === p.invoice_id); return `<div class="kf-row kf-rc"><span><b>${esc(p.no)} · ${KSH(p.amount)}</b><small>${esc(i ? (i.order_ref || '') + ' · ' + firstName(i.customer) : '')} · ${esc(p.method)}${p.reference ? ' ' + esc(p.reference) : ''} · ${dShort(p.created_at)}</small></span><span class="kf-btns"><button class="btn sm line" data-mviewr="${p.id}">👁 See</button><button class="btn sm ${p.sent_at ? 'line' : ''}" data-msendr="${p.id}">📤 ${p.sent_at ? 'Again' : 'Send'}</button></span></div>`; }).join('') || '<p class="kf-empty">No receipts yet. Open an order → Invoice & payments → Record payment.</p>'}</section>
       ${done.length ? `<section class="kf-panel"><div class="kf-title"><h2>Fully paid</h2><span>${done.length}</span></div>${done.slice(0, 20).map(row).join('')}</section>` : ''}
       <p class="kf-footnote">To make an invoice: open the order → 💳 Invoice & payments → Make invoice. Receipts are made when you record a payment you have checked.</p></div>`;
   }
@@ -1571,6 +1573,11 @@
         <div class="actions"><button class="btn line" data-x>Close</button><button class="btn" id="nobBin">🗑 Open the Bin</button></div>`);
       document.getElementById('nobBin').onclick = () => binModal(); return; }
     const mp = e.target.closest('[data-mpay]'); if (mp){ const o = O(mp.dataset.mpay); if (o) payModal(o, mp.dataset.mref || ''); return; }
+    const vi = e.target.closest('[data-mviewinv],[data-mviewr]'); if (vi && !vi.disabled){ vi.disabled = true;
+      const w = window.open('', '_blank');
+      try { const blob = vi.dataset.mviewinv ? await invoiceBlob(vi.dataset.mviewinv) : await receiptBlob(vi.dataset.mviewr);
+        const u = URL.createObjectURL(blob); if (w) w.location.href = u; else window.open(u, '_blank'); }
+      catch(er){ if (w) w.close(); toast(errMsg(er)); } vi.disabled = false; return; }
     const si = e.target.closest('[data-msendinv]'); if (si && !si.disabled){ si.disabled = true; try { await sendInvoice(si.dataset.msendinv); await load(); } catch(er){ toast(errMsg(er)); } si.disabled = false; return; }
     const sr = e.target.closest('[data-msendr]'); if (sr && !sr.disabled){ sr.disabled = true; try { await sendReceipt(sr.dataset.msendr); await load(); } catch(er){ toast(errMsg(er)); } sr.disabled = false; return; }
     const mc = e.target.closest('[data-mcancel]'); if (mc){
