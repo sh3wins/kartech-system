@@ -1484,9 +1484,9 @@
       <h3>${isR ? 'Payment recorded' : 'Invoice ready'}</h3>
       <p class="sub">${isR ? `Receipt <b>${esc(doc.no)}</b> · ${KSH(doc.amount)}${extra && extra.balance > 0 ? ` · balance ${KSH(extra.balance)}` : ' · fully paid ✓'}` : `<b>${esc(doc.no)}</b> · total ${KSH(doc.total)}`}</p>
       ${isR && extra && extra.first ? '<p class="mo-note">✓ The workshop can start this order now.</p>' : ''}
-      ${isR ? `<label class="mo-with"><input type="checkbox" id="mrOrder" checked> Also send the order sheet <small>(what they ordered and where it is now, no money on it)</small></label>` : ''}
+      ${isR ? `<label class="mo-with"><input type="checkbox" id="mrOrder" checked> Add the order sheet as page 2 <small>(what they ordered and where it is now)</small></label>` : ''}
       <button class="btn mo-big" id="mrSend">📤 Send ${isR ? 'receipt' : 'invoice'} to ${esc(firstName(o.customer))}</button>
-      <p class="sub" style="font-size:12.5px">On the phone: pick WhatsApp, then ${esc(firstName(o.customer))}. ${isR ? 'The PDFs go with it.' : 'The PDF goes with it.'}</p>
+      <p class="sub" style="font-size:12.5px">On the phone: pick WhatsApp, then ${esc(firstName(o.customer))}. The PDF goes with it.</p>
       <div class="mo-views"><button class="btn line" id="mrView">👁 Look at the ${isR ? 'receipt' : 'PDF'}</button>${isR ? '<button class="btn line" id="mrViewO">👁 Look at the order sheet</button>' : ''}</div>
       <div class="actions"><button class="btn line" data-x>Done</button></div></div>`);
     let blob = null;
@@ -1506,11 +1506,12 @@
     const inv = S.money.inv.find(i => i.id === id); if (!inv) throw new Error('Invoice not found');
     return KPDF.invoice({ biz: S.money.biz, inv, paid: paidOf(inv) });
   }
-  async function receiptBlob(id){
+  async function receiptBlob(id, withOrder){
     const p = S.money.pays.find(x => x.id === id); if (!p) throw new Error('Receipt not found');
     const inv = S.money.inv.find(i => i.id === p.invoice_id);
     const upTo = paysOf(inv).filter(x => new Date(x.created_at) <= new Date(p.created_at)).reduce((a, x) => a + Number(x.amount), 0);
-    return KPDF.receipt({ biz: S.money.biz, inv, pay: p, paidSoFar: upTo, balance: Number(inv.total) - upTo });
+    const extra = withOrder && inv && inv.order_id && O(inv.order_id) ? orderArgs(inv.order_id, inv) : null;
+    return KPDF.receipt({ biz: S.money.biz, inv, pay: p, paidSoFar: upTo, balance: Number(inv.total) - upTo, withOrder: extra });
   }
   async function sendInvoice(id, blob){
     const inv = S.money.inv.find(i => i.id === id), o = inv && O(inv.order_id);
@@ -1522,23 +1523,24 @@
     return r;
   }
   // the order sheet: what the client ordered + progress, no money (for sending with a receipt)
-  async function orderBlob(orderId, inv){
+  function orderArgs(orderId, inv){
     const o = O(orderId); if (!o) return null;
     const ts = S.tasks.filter(t => t.order === o.id).sort((a, b) => a.step - b.step);
     const cur = ts.find(t => t.status !== 'done');
     const steps = ts.map(t => ({ name: (ALL_STEPS.find(s => s.id === t.stage) || { name: t.stage }).name, state: t.status === 'done' ? 'done' : t === cur ? 'now' : 'todo' }));
     const items = inv && inv.items ? inv.items.map(it => ({ desc: it.desc, qty: it.qty })) : null;
-    return KPDF.order({ biz: S.money ? S.money.biz : {}, o: Object.assign({}, o, { phone: (inv && inv.phone) || phoneOf(o) }), items, steps,
-      link: o.room ? roomLink(o) : null, deliveredOn: o.deliveredAt || null });
+    return { biz: S.money ? S.money.biz : {}, o: Object.assign({}, o, { phone: (inv && inv.phone) || phoneOf(o) }), items, steps,
+      link: o.room ? roomLink(o) : null, deliveredOn: o.deliveredAt || null };
   }
+  async function orderBlob(orderId, inv){ const a = orderArgs(orderId, inv); return a ? KPDF.order(a) : null; }
+  // ONE PDF: page 1 the receipt, page 2 the order sheet (one file, so it can't get lost on the way)
   async function sendReceipt(id, blob, withOrder = true){
     const p = S.money.pays.find(x => x.id === id), inv = S.money.inv.find(i => i.id === p.invoice_id), o = inv && O(inv.order_id);
-    blob = blob || await receiptBlob(id);
-    const files = [{ blob, name: `Kartech-${p.no}.pdf` }];
-    if (withOrder && o){ try { const ob = await orderBlob(o.id, inv); if (ob) files.push({ blob: ob, name: `Kartech-order-${o.ref}.pdf` }); } catch (e) {} }
-    const msg = `Hi ${firstName(inv.customer)}, thank you! Here is your Kartech receipt ${p.no} for ${KSH(p.amount)} (${inv.order_ref || inv.no})${files.length > 1 ? ', and a sheet showing your order and where it is now' : ''}.${o && o.room ? `\nFollow your order here: ${roomLink(o)}` : ''}`;
-    const r = await KPDF.send(files, null, msg, inv.phone || (o && phoneOf(o)));
-    if (r !== 'cancel'){ await db.rpc('kt_receipt_sent', { p_payment: id }); toast(r === 'shared' ? (files.length > 1 ? 'Receipt and order sheet sent ✓' : 'Receipt sent ✓') : (files.length > 1 ? 'Both PDFs saved. Attach them in WhatsApp.' : 'Receipt PDF saved. Attach it in WhatsApp.')); }
+    const both = !!(withOrder && o);
+    if (both || !blob) blob = await receiptBlob(id, both);
+    const msg = `Hi ${firstName(inv.customer)}, thank you! Here is your Kartech receipt ${p.no} for ${KSH(p.amount)} (${inv.order_ref || inv.no})${both ? '. Page 2 shows your order and where it is now' : ''}.${o && o.room ? `\nFollow your order here: ${roomLink(o)}` : ''}`;
+    const r = await KPDF.send(blob, `Kartech-receipt-${p.no}.pdf`, msg, inv.phone || (o && phoneOf(o)));
+    if (r !== 'cancel'){ await db.rpc('kt_receipt_sent', { p_payment: id }); toast(r === 'shared' ? 'Receipt sent ✓' : 'Receipt PDF saved to Downloads. Attach it in WhatsApp.'); }
     return r;
   }
 

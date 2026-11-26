@@ -131,7 +131,7 @@ window.KPDF = (() => {
     return doc.output('blob');
   }
 
-  async function receipt({ biz, inv, pay, paidSoFar, balance }){
+  async function receipt({ biz, inv, pay, paidSoFar, balance, withOrder }){
     const { jsPDF } = await load(); const doc = new jsPDF({ unit: 'mm', format: 'a5' });
     doc.setProperties({ title: 'Kartech receipt ' + pay.no, author: 'Kartech Engineering' });
     let y = head(doc, biz, 'RECEIPT', pay.no, dayTime(pay.created_at));
@@ -168,14 +168,17 @@ window.KPDF = (() => {
       doc.setFont('helvetica', 'normal'); doc.setFontSize(8.6); doc.setTextColor(...C.ink); doc.text(lines, 17, nTop + 10.4);
     }
     await foot(doc, ['Received and confirmed by Kartech Engineering.', 'Thank you for your business. Please keep this receipt.', balance > 0 ? 'The balance is due before delivery.' : 'Fully paid. Thank you!'], pay.check_code);
+    if (withOrder) await order(withOrder, doc);   // page 2: the order sheet, in the same PDF
     return doc.output('blob');
   }
 
   /* ORDER SHEET: what the client ordered and where it is. No money on it (that's on the receipt). */
-  async function order({ biz, o, items, steps, link, deliveredOn }){
-    const { jsPDF } = await load(); const doc = new jsPDF({ unit: 'mm', format: 'a5' });
+  async function order({ biz, o, items, steps, link, deliveredOn }, into){
+    let doc;
+    if (into){ doc = into; doc.addPage('a5'); }
+    else { const { jsPDF } = await load(); doc = new jsPDF({ unit: 'mm', format: 'a5' }); }
     const W = 148;
-    doc.setProperties({ title: 'Kartech order ' + o.ref, author: 'Kartech Engineering' });
+    if (!into) doc.setProperties({ title: 'Kartech order ' + o.ref, author: 'Kartech Engineering' });
     let y = head(doc, biz, 'ORDER', o.ref, 'Ordered ' + day(o.createdAt));
     // who and when
     label(doc, 'FOR', 12, y); label(doc, deliveredOn ? 'DELIVERED' : 'READY BY', 78, y);
@@ -237,7 +240,7 @@ window.KPDF = (() => {
       doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(...C.muted); doc.text('or scan the code', 95, y + 20.2);
     }
     await foot(doc, ['Kartech Engineering · made in our own workshop in Nairobi.', 'This sheet shows your order. Payments are on your receipt.', 'Questions? Reply on WhatsApp or call us.'], null);
-    return doc.output('blob');
+    return into ? null : doc.output('blob');
   }
 
   // phone: Share sheet (the PDFs go into WhatsApp) · computer: download + open WhatsApp
