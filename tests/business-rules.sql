@@ -224,6 +224,73 @@ begin
       msg := null;
     end if;
 
+    -- ---------- messages (update 28) ----------
+    if to_regclass('public.ws_messages') is not null then
+      select id into w_id from public.ws_workers where active limit 1;
+      if w_id is not null then
+        perform set_config('request.jwt.claim.sub', owner_id::text, true);
+        perform set_config('request.jwt.claims', json_build_object('sub', owner_id, 'role', 'authenticated')::text, true);
+        execute 'set local role authenticated';
+        perform public.ws_owner_msg(w_id, 'TEST message');
+        select count(*) into n from public.ws_messages where body = 'TEST message';
+        res := res || format('%s|The owner can message a worker|%s sent', case when n = 1 then 'PASS' else 'FAIL' end, n);
+        execute 'reset role';
+        perform set_config('request.jwt.claim.sub', station_id::text, true);
+        perform set_config('request.jwt.claims', json_build_object('sub', station_id, 'role', 'authenticated')::text, true);
+        execute 'set local role authenticated';
+        select count(*) into n from public.ws_messages;
+        res := res || format('%s|The workshop computer cannot read all the messages|%s visible', case when n = 0 then 'PASS' else 'FAIL' end, n);
+        begin
+          perform public.ws_my_msgs('00000000-0000-0000-0000-000000000000'::uuid);
+          res := res || 'FAIL|Messages need the worker to be signed in|they were shown'::text;
+        exception when others then res := res || ('PASS|Messages need the worker to be signed in|' || sqlerrm); end;
+        execute 'reset role';
+        perform set_config('request.jwt.claim.sub', '', true);
+        perform set_config('request.jwt.claims', '{"role":"anon"}', true);
+        execute 'set local role anon';
+        begin
+          perform public.ws_owner_msg(w_id, 'hack');
+          res := res || 'FAIL|A stranger cannot send messages|it was sent'::text;
+        exception when others then res := res || ('PASS|A stranger cannot send messages|' || sqlerrm); end;
+        execute 'reset role';
+      end if;
+    end if;
+
+    -- ---------- fabrics (update 29) ----------
+    if to_regclass('public.kt_fabrics') is not null then
+      perform set_config('request.jwt.claim.sub', owner_id::text, true);
+      perform set_config('request.jwt.claims', json_build_object('sub', owner_id, 'role', 'authenticated')::text, true);
+      execute 'set local role authenticated';
+      declare fb uuid; begin
+        fb := public.kt_save_fabric(jsonb_build_object('kind', 'TEST fabric', 'colour', 'Pink', 'hex', '#ff88aa', 'metres', 10));
+        perform public.kt_fabric_metres(fb, -3);
+        select count(*) into n from public.kt_fabrics where id = fb and metres = 7;
+        res := res || format('%s|The owner can add a fabric and take metres off|%s right', case when n = 1 then 'PASS' else 'FAIL' end, n);
+        perform public.kt_set_order_fabric(o_id, fb);
+        select count(*) into n from public.ws_orders where id = o_id and fabric = 'TEST fabric · Pink';
+        res := res || format('%s|An order can carry a fabric and colour|%s order', case when n = 1 then 'PASS' else 'FAIL' end, n);
+        execute 'reset role';
+        perform set_config('request.jwt.claim.sub', station_id::text, true);
+        perform set_config('request.jwt.claims', json_build_object('sub', station_id, 'role', 'authenticated')::text, true);
+        execute 'set local role authenticated';
+        select count(*) into n from public.kt_fabrics where id = fb;
+        res := res || format('%s|The workshop computer can see the fabric list|%s seen', case when n = 1 then 'PASS' else 'FAIL' end, n);
+        begin
+          perform public.kt_save_fabric(jsonb_build_object('kind', 'hack', 'colour', 'x'));
+          res := res || 'FAIL|The workshop computer cannot change the fabric list|it was changed'::text;
+        exception when others then res := res || ('PASS|The workshop computer cannot change the fabric list|' || sqlerrm); end;
+        execute 'reset role';
+        perform set_config('request.jwt.claim.sub', '', true);
+        perform set_config('request.jwt.claims', '{"role":"anon"}', true);
+        execute 'set local role anon';
+        begin
+          select count(*) into n from public.kt_fabrics;
+          res := res || format('%s|A stranger cannot see the fabric list|%s seen', case when n = 0 then 'PASS' else 'FAIL' end, n);
+        exception when others then res := res || ('PASS|A stranger cannot see the fabric list|' || sqlerrm); end;
+        execute 'reset role';
+      end;
+    end if;
+
     -- ---------- as the OWNER again: the Bin ----------
     perform set_config('request.jwt.claim.sub', owner_id::text, true);
     perform set_config('request.jwt.claims', json_build_object('sub', owner_id, 'role', 'authenticated')::text, true);

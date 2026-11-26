@@ -100,7 +100,7 @@
       S.hasCode = hc.error ? null : !!hc.data;
       S.toolMissing = tm.error ? [] : tm.data.map(x => ({ tool:x.tool_id, worker:x.worker_id, since:String(x.since).slice(0, 10), found: !!x.found_at }));
       S.std = sd.error ? [] : sd.data.map(x => ({ product:x.product, mat:x.material_id, per:+x.per_piece }));
-      S.orders = o.data.map(x => ({ id:x.id, ref:x.ref, src:x.source_order_id || null, srcNo:x.source_no || null, customer:x.customer, item:x.item, qty:x.qty, deadline:new Date(x.deadline + 'T17:00'), dl:String(x.deadline).slice(0, 10), urgency:x.urgency, notes:x.notes, stages:x.stages, delivered: !!x.delivered_at, createdAt: new Date(x.created_at).getTime(), by: x.created_by || 'owner', reqId: x.request_id || null, room: x.room_code || null, approvedAt: x.approved_at ? new Date(x.approved_at).getTime() : null, delOn: x.delivery_on ? String(x.delivery_on).slice(0, 10) : null, delPlace: x.delivery_place || '', delNote: x.delivery_note || '', deliveredAt: x.delivered_at ? new Date(x.delivered_at).getTime() : null,
+      S.orders = o.data.map(x => ({ fabric:x.fabric || null, fabricHex:x.fabric_hex || null, fabricId:x.fabric_id || null, id:x.id, ref:x.ref, src:x.source_order_id || null, srcNo:x.source_no || null, customer:x.customer, item:x.item, qty:x.qty, deadline:new Date(x.deadline + 'T17:00'), dl:String(x.deadline).slice(0, 10), urgency:x.urgency, notes:x.notes, stages:x.stages, delivered: !!x.delivered_at, createdAt: new Date(x.created_at).getTime(), by: x.created_by || 'owner', reqId: x.request_id || null, room: x.room_code || null, approvedAt: x.approved_at ? new Date(x.approved_at).getTime() : null, delOn: x.delivery_on ? String(x.delivery_on).slice(0, 10) : null, delPlace: x.delivery_place || '', delNote: x.delivery_note || '', deliveredAt: x.delivered_at ? new Date(x.delivered_at).getTime() : null,
         hold: !!x.on_hold, invoiceAt: tms(x.invoice_at), depCode: x.dep_code || null, depClaimed: tms(x.dep_claimed_at), depOk: tms(x.dep_ok_at), balCode: x.bal_code || null, balClaimed: tms(x.bal_claimed_at), paidAt: tms(x.paid_at) }));
       S.tasks = t.data.map(x => ({ id:x.id, order:x.order_id, step:x.step, stage:x.stage, status:x.status, worker:x.worker_id, rank:x.rank, withPrev: !!x.with_prev, doneAt: x.done_at ? new Date(x.done_at).getTime() : null, planned: Array.isArray(x.planned) ? x.planned : String(x.planned || '').replace(/[{}]/g, '').split(',').filter(Boolean),
         problem: x.problem_at ? { reason:x.problem_reason, at:new Date(x.problem_at).getTime(), stopped:!!x.problem_stopped, ack: !!x.problem_ack_at } : null }));
@@ -116,6 +116,16 @@
       // the website shop's products (update-26)
       const pr = await db.from('kt_products').select('*').order('sort').order('name');
       S.prods = pr.error ? null : pr.data;
+      const fb2 = await db.from('kt_fabrics').select('*').eq('active', true).order('kind').order('colour');
+      S.fabs = fb2.error ? null : fb2.data;
+      // messages with workers (update-28)
+      const ms = await db.from('ws_messages').select('*').order('created_at', { ascending:false }).limit(600);
+      const prevIds = S.msgs ? new Set(S.msgs.map(m => m.id)) : null;
+      S.msgs = ms.error ? null : ms.data.reverse();
+      if (prevIds && S.msgs){ const fresh = S.msgs.filter(m => !m.from_owner && !prevIds.has(m.id));
+        if (fresh.length && !(chatWith && fresh.every(m => m.worker_id === chatWith))){ const w = S.workers.find(x => x.id === fresh[fresh.length - 1].worker_id);
+          toast(`💬 New message from ${w ? w.name : 'a worker'}`); try { msgBeep(); } catch (er) {} } }
+      if (chatWith) drawChat();
       loaded = true;
       loadDay();
       announceChanges();
@@ -199,6 +209,7 @@
   let enter = true, prevStats = {}, seenAtt = null, orderFilter = null;
   let stockMode = 'shop'; try { stockMode = localStorage.getItem('kt-stockmode') || 'shop'; } catch (e) {}
   let shopFilter = 'All';
+  let chatWith = null;
   let demandBy = 'pcs'; try { demandBy = localStorage.getItem('kt-demand') || 'pcs'; } catch (e) {}
   let orderSrc = 'all'; try { orderSrc = localStorage.getItem('kt-osrc') || 'all'; } catch (e) {}
   const srcOf = o => (o.srcNo || o.reqId) ? 'online' : 'shop';
@@ -564,6 +575,58 @@
   }
 
 
+  /* ---------- MESSAGES: the owner and each worker ---------- */
+  const msgTime = t => { const d = new Date(t), now = new Date();
+    const hm = d.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' });
+    return d.toDateString() === now.toDateString() ? hm : d.toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short' }) + ' ' + hm; };
+  function msgBeep(){ const a = new (window.AudioContext || window.webkitAudioContext)(), o = a.createOscillator(), g = a.createGain();
+    o.frequency.value = 880; o.connect(g); g.connect(a.destination); g.gain.setValueAtTime(.15, a.currentTime); g.gain.exponentialRampToValueAtTime(.001, a.currentTime + .25); o.start(); o.stop(a.currentTime + .26); }
+  function viewMessages(){
+    if (!S.msgs) return `<div class="d-head anim"><div><h1>Messages</h1></div></div><div class="card"><p>Run <b>update-28-messages.sql</b> in Supabase to turn on messages with workers.</p></div>`;
+    const ws = S.workers.filter(w => w.active).map(w => { const mine = S.msgs.filter(m => m.worker_id === w.id); const last = mine[mine.length - 1];
+      return { w, last, unread: mine.filter(m => !m.from_owner && !m.read_at).length }; })
+      .sort((a, b) => (b.unread - a.unread) || ((b.last ? +new Date(b.last.created_at) : 0) - (a.last ? +new Date(a.last.created_at) : 0)) || a.w.name.localeCompare(b.w.name));
+    return `<div class="d-head anim" style="--i:0"><div><h1>Messages</h1><p class="sub" style="margin:0">Write to one worker. They read it on the workshop screen when they tap their name, and can reply. The manager doesn't see these.</p></div></div>
+      <div class="msg-list">${ws.length ? ws.map((x, i) => `<button class="msg-row anim ${x.unread ? 'new' : ''}" style="--i:${Math.min(i + 1, 10)}" data-chat="${x.w.id}">
+          <span class="msg-av">${esc(x.w.name.charAt(0))}</span>
+          <span class="msg-mid"><b>${esc(x.w.name)}</b><small>${x.last ? (x.last.from_owner ? 'You: ' : '') + esc(x.last.body.slice(0, 80)) : esc(stageName(x.w.stage)) + ' · no messages yet'}</small></span>
+          <span class="msg-end">${x.last ? `<small>${msgTime(x.last.created_at)}</small>` : ''}${x.unread ? `<i>${x.unread}</i>` : ''}</span></button>`).join('')
+        : '<p class="empty">Add workers first (Workers page).</p>'}</div>`;
+  }
+  function drawChat(){
+    const box = document.getElementById('chatThread'); if (!box || !S.msgs) return;
+    const mine = S.msgs.filter(m => m.worker_id === chatWith), atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+    box.innerHTML = mine.length ? mine.map(m => `<div class="bub ${m.from_owner ? 'me' : 'them'}"><p>${esc(m.body).replace(/\n/g, '<br>')}</p><small>${msgTime(m.created_at)}${m.from_owner ? (m.read_at ? ' · seen ✓✓' : ' · sent ✓') : ''}</small></div>`).join('')
+      : '<p class="chat-empty">No messages yet. Say hello, or give an instruction.</p>';
+    if (atEnd || !box.dataset.ready){ box.scrollTop = box.scrollHeight; box.dataset.ready = '1'; }
+    // she is looking at this chat: anything new from the worker counts as read
+    const wid = chatWith;
+    if (mine.some(m => !m.from_owner && !m.read_at)){ mine.forEach(m => { if (!m.from_owner && !m.read_at) m.read_at = new Date().toISOString(); });
+      db.rpc('ws_owner_msg_read', { p_worker: wid }); }
+  }
+  async function openChat(wid){
+    if (!S.msgs) return toast('Run update-28-messages.sql in Supabase first.');
+    const w = S.workers.find(x => x.id === wid); if (!w) return;
+    chatWith = wid;
+    const s = openModal(`<div class="chat">
+      <div class="chat-h"><span class="msg-av">${esc(w.name.charAt(0))}</span><div><h3>${esc(w.name)}</h3><small>${esc(stageName(w.stage))} · reads this on the workshop screen</small></div><button class="btn sm line" data-x>Close</button></div>
+      <div class="chat-t" id="chatThread"></div>
+      <div class="chat-quick">${['Come to the office please', 'Good work today 👍', 'Call me when you can', 'Please hurry with this job'].map(q => `<button type="button" data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div>
+      <form class="chat-f" id="chatForm"><textarea id="chatIn" rows="2" maxlength="1000" placeholder="Write to ${esc(w.name)}…"></textarea><button class="btn" id="chatSend">Send</button></form></div>`);
+    drawChat();
+    const inp = s.querySelector('#chatIn'); setTimeout(() => inp.focus(), 50);
+    const send = async () => { const body = inp.value.trim(); if (!body) return inp.focus();
+      const b = s.querySelector('#chatSend'); b.disabled = true;
+      const { error } = await db.rpc('ws_owner_msg', { p_worker: wid, p_body: body });
+      b.disabled = false; if (error) return toast(errMsg(error));
+      inp.value = ''; S.msgs.push({ id: 'tmp' + Date.now(), worker_id: wid, from_owner: true, body, created_at: new Date().toISOString(), read_at: null }); drawChat(); inp.focus(); };
+    s.querySelector('#chatForm').addEventListener('submit', e => { e.preventDefault(); send(); });
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); send(); } });
+    s.querySelectorAll('[data-q]').forEach(b => b.onclick = () => { inp.value = b.dataset.q; inp.focus(); });
+    const stop = new MutationObserver(() => { if (!document.body.contains(s)){ chatWith = null; stop.disconnect(); if (tab === 'messages') render(); } });
+    stop.observe(document.body, { childList: true });
+  }
+
   function viewWorkers(){
     const row = w => { const [k, l] = workerStatus(w); const t = w.task && T(w.task); const o = t && O(t.order);
       const nPlan = w.active ? S.tasks.filter(x => x.status !== 'done' && x.planned.includes(w.id) && x.worker !== w.id && O(x.order) && !O(x.order).delivered).length : 0;
@@ -571,7 +634,7 @@
         <div class="s">${stageName(w.stage)}${w.covers.length ? ` · also ${w.covers.map(c => stageName(c).toLowerCase()).join(', ')}` : ''}${o ? ` · on ${o.ref}` : ''}</div></button>
         ${w.active ? (w.here ? `<span class="in-chip">✓ In${w.arrivedAt ? ' ' + new Date(w.arrivedAt).toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' }) : ''}</span><button class="btn sm line away-btn" data-away="${w.id}" data-v="1">Away today</button>`
           : `<button class="btn sm away-btn" data-away="${w.id}" data-v="0">Mark in</button>${w.away ? '' : `<button class="btn sm line away-btn" data-away="${w.id}" data-v="1">Away</button>`}`) : ''}
-        <button class="btn sm line" data-editw="${w.id}">Edit</button></div>`; };
+        ${w.active ? `<button class="btn sm line" data-chat="${w.id}">💬</button>` : ''}<button class="btn sm line" data-editw="${w.id}">Edit</button></div>`; };
     const away = S.workers.filter(w => w.active && w.away);
     return `
       <div style="display:flex;justify-content:space-between;align-items:end;gap:12px;flex-wrap:wrap"><div><h2>Workers</h2>
@@ -823,8 +886,9 @@
     document.querySelectorAll('.tabs [data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
     const n = attention().filter(a => a.lvl === 'red').length;
     $('#attnBadge').textContent = n || ''; $('#attnBadge').style.display = n ? '' : 'none';
+    const um = S.msgs ? S.msgs.filter(m => !m.from_owner && !m.read_at).length : 0, mb = $('#msgBadge'); if (mb){ mb.textContent = um || ''; mb.style.display = um ? '' : 'none'; }
     const v = $('#view');
-    v.innerHTML = tab === 'today' ? viewToday() : tab === 'orders' ? viewOrders() : tab === 'workers' ? viewWorkers() : tab === 'stock' ? viewStock() : tab === 'finance' ? viewFinance() : tab === 'history' ? viewHistory() : viewWorkshop();
+    v.innerHTML = tab === 'today' ? viewToday() : tab === 'orders' ? viewOrders() : tab === 'workers' ? viewWorkers() : tab === 'stock' ? viewStock() : tab === 'finance' ? viewFinance() : tab === 'history' ? viewHistory() : tab === 'messages' ? viewMessages() : viewWorkshop();
     v.classList.toggle('enter', enter);
     if (enter){ v.querySelectorAll('[data-count]').forEach(countUp); }
     else v.querySelectorAll('.kpi.pop [data-count]').forEach(countUp);
@@ -847,6 +911,7 @@
     const sfb = e.target.closest('[data-sfilter]'); if (sfb){ shopFilter = sfb.dataset.sfilter; return render(); }
     const spb = e.target.closest('[data-prod]'); if (spb) return productModal(spb.dataset.prod);
     if (e.target.closest('[data-addprod]')) return productModal(null);
+    const fbb = e.target.closest('[data-fabric]'); if (fbb) return fabricModal(fbb.dataset.fabric || null);
     if (e.target.closest('[data-addmat]')) return materialModal();
     if (e.target.closest('[data-addtool]')) return toolModal();
     if (e.target.closest('[data-fmcode]')) return fmCodeModal();
@@ -900,6 +965,7 @@
     const os = e.target.closest('[data-osrc]'); if (os){ orderSrc = os.dataset.osrc; try { localStorage.setItem('kt-osrc', orderSrc); } catch (er) {} render(); return; }
     if (e.target.closest('#clearFilter')){ orderFilter = null; enter = true; render(); return; }
     if (e.target.closest('#sideSet') || e.target.closest('#mSet')) return settingsModal();
+    const ch = e.target.closest('[data-chat]'); if (ch) return openChat(ch.dataset.chat);
     const ew = e.target.closest('[data-editw]'); if (ew) return workerModal(ew.dataset.editw);
     const odl = e.target.closest('[data-odel]'); if (odl){
       const o = O(odl.dataset.odel); if (!o) return;
@@ -1213,6 +1279,7 @@
       </div>
       <label class="field"><span>Deadline</span><input id="fDate" type="date" value="${iso}"></label>
       <label class="field"><span>Note for the workshop (optional)</span><textarea id="fNote" rows="2" placeholder="e.g. Black frames, red seats. Customer collects.">${esc(pre.notes || '')}</textarea></label>
+      <div class="field"><span>🧵 Fabric &amp; colour</span>${fabricPicker('fFab', null)}</div>
       <div class="field"><span>How urgent</span><div class="seg-pick" id="fUrg">
         <button type="button" data-u="normal" class="on">Normal</button><button type="button" data-u="high">High</button><button type="button" data-u="urgent">Urgent</button></div></div>
       <div class="field"><span>📐 Pictures of what to make (optional)</span>
@@ -1222,7 +1289,7 @@
       ${S.pay !== null ? `<label class="hold-pick"><input type="checkbox" id="fHold" checked> <span><b>Wait for the half payment</b><small>The workshop starts after you confirm the deposit. Untick if they paid already or don't need to.</small></span></label>` : ''}
       <p id="fErr" style="color:var(--red);min-height:20px;font-size:13px"></p>
       <div class="actions"><button class="btn line" data-x>Cancel</button><button class="btn" id="fSave">Add to workshop</button></div>`);
-    let urg = 'normal'; bindStepPeople(s);
+    let urg = 'normal'; bindStepPeople(s); const getFab = bindFabricPicker(s, 'fFab');
     const pics = []; const pg = s.querySelector('#fPicsGrid');
     const drawPics = () => { pg.innerHTML = pics.map((f, i) => `<div class="ph"><img src="${URL.createObjectURL(f)}" alt=""><button type="button" class="ph-rm" data-fpx="${i}">✕</button></div>`).join(''); };
     s.querySelector('#fPics').onchange = e => { pics.push(...[...e.target.files].filter(f => /^image\//.test(f.type))); e.target.value = ''; drawPics(); };
@@ -1240,8 +1307,9 @@
       const btn = s.querySelector('#fSave'); btn.disabled = true; btn.textContent = 'Adding…';
       const { data, error } = await db.rpc('ws_create_order', { p: { customer, item, qty, deadline: s.querySelector('#fDate').value || null, urgency: urg, stages, people, together, notes: s.querySelector('#fNote').value.trim(), request_id: pre.req ? pre.req.id : null } });
       if (error){ btn.disabled = false; btn.textContent = 'Add to workshop'; s.querySelector('#fErr').textContent = errMsg(error); return; }
-      const hb = s.querySelector('#fHold'), noWait = hb && !hb.checked;
-      if (pics.length || noWait){ btn.textContent = pics.length ? 'Adding pictures…' : 'Adding…'; await load(); const no = S.orders.find(x => x.ref === data);
+      const hb = s.querySelector('#fHold'), noWait = hb && !hb.checked, fid = getFab();
+      if (pics.length || noWait || fid){ btn.textContent = pics.length ? 'Adding pictures…' : 'Adding…'; await load(); const no = S.orders.find(x => x.ref === data);
+        if (no && fid) await db.rpc('kt_set_order_fabric', { p_order: no.id, p_fabric: fid });
         if (no && noWait) await db.rpc('ws_hold', { p_order: no.id, p_hold: false });
         if (no) for (const f of pics) await addPhoto(no, f, 'ref', true); }
       closeModal(); tab = 'orders'; await load();
@@ -1271,6 +1339,7 @@
       </div>
       <label class="field"><span>Deadline</span><input id="eDate" type="date" value="${o.dl}"></label>
       <label class="field"><span>Note for the workshop</span><textarea id="eNote" rows="2">${esc(o.notes || '')}</textarea></label>
+      <div class="field"><span>🧵 Fabric &amp; colour</span>${fabricPicker('eFab', o.fabricId)}${o.fabric && !o.fabricId ? `<small class="hint-sm">Now: ${esc(o.fabric)}</small>` : ''}</div>
       <div class="field"><span>How urgent</span><div class="seg-pick" id="eUrg">
         ${['normal','high','urgent'].map(u => `<button type="button" data-u="${u}" class="${o.urgency === u ? 'on' : ''}">${URG_NAME[u]}</button>`).join('')}</div></div>
       <div class="field"><span>Steps and who does them</span>${stepPeople(o.stages, Object.fromEntries(ts.map(t => [t.stage, t.planned])), lock, ts.filter(t => t.withPrev).map(t => t.stage))}
@@ -1280,7 +1349,7 @@
         <button class="btn red line" id="eDel">🗑 Delete order</button>
         <span style="display:flex;gap:10px"><button class="btn line" data-x>Cancel</button><button class="btn" id="eSave">Save changes</button></span>
       </div>`);
-    let urg = o.urgency; bindStepPeople(s);
+    let urg = o.urgency; bindStepPeople(s); const getFab = bindFabricPicker(s, 'eFab');
     s.querySelector('#eUrg').addEventListener('click', e => { const b = e.target.closest('[data-u]'); if (!b) return; urg = b.dataset.u; s.querySelectorAll('#eUrg button').forEach(x => x.classList.toggle('on', x === b)); });
     s.querySelector('#eSave').onclick = async () => {
       const customer = s.querySelector('#eCust').value.trim(), item = s.querySelector('#eItem').value.trim();
@@ -1291,6 +1360,7 @@
       const btn = s.querySelector('#eSave'); btn.disabled = true; btn.textContent = 'Saving…';
       const { error } = await db.rpc('ws_edit_order', { p: { id: o.id, customer, item, qty, deadline: s.querySelector('#eDate').value || null, urgency: urg, stages, people, together, notes: s.querySelector('#eNote').value.trim() } });
       if (error){ btn.disabled = false; btn.textContent = 'Save changes'; s.querySelector('#eErr').textContent = /ws_edit_order/.test(errMsg(error)) ? 'Run update-9-edit-orders.sql in Supabase first.' : errMsg(error); return; }
+      const fid = getFab(); if (S.fabs && (fid || null) !== (o.fabricId || null)) await db.rpc('kt_set_order_fabric', { p_order: o.id, p_fabric: fid });
       closeModal(); toast(`${o.ref} updated`); await load(); orderModal(o.id);
     };
     const del = s.querySelector('#eDel'); let sure = false;
@@ -1601,6 +1671,7 @@
       ${o.by === 'manager' ? `<p style="margin:4px 0;font-size:13px;color:var(--muted)">👤 Taken by the manager on the workshop screen</p>` : ''}
       ${o.srcNo ? `<p style="margin:4px 0;font-size:13px;color:var(--muted)">🌐 Website order ${esc(o.srcNo)} · the customer sees these steps live on their tracking page</p>` : ''}
       ${o.notes ? `<p style="margin:6px 0;padding:10px 12px;background:#fff;border:1px solid var(--line);border-radius:6px">📝 ${esc(o.notes)}</p>` : ''}
+      ${o.fabric ? `<p class="o-fab">🧵 Fabric: ${fsw(o.fabricHex)}<b>${esc(o.fabric)}</b></p>` : ''}
       <p class="${!p.finished && isLate(o.deadline) ? 'due late' : ''}" style="text-align:left">Deadline: ${fmtDay(o.deadline)}</p>
       ${!o.delivered ? `<div class="dl-line">🚚 ${o.delOn ? `Delivery <b>${esc(dayName(o.delOn))}</b>${o.delPlace ? ' · ' + esc(o.delPlace) : ''}${o.delNote ? ` <small>(${esc(o.delNote)})</small>` : ''}` : 'No delivery day yet'} <button class="btn sm line" data-dplan="${o.id}">${o.delOn ? 'Move' : 'Plan delivery'}</button></div>` : ''}
       ${payBox(o)}
@@ -1774,13 +1845,62 @@
     setTimeout(() => s.querySelector('#tName').focus(), 50);
   }
 
-  const stockToggle = () => `<div class="kd-seg sp-mode" role="group" aria-label="Show"><button class="${stockMode === 'shop' ? 'on' : ''}" data-smode="shop">Shop products</button><button class="${stockMode === 'tools' ? 'on' : ''}" data-smode="tools">Tools &amp; materials</button></div>`;
+  const stockToggle = () => `<div class="kd-seg sp-mode" role="group" aria-label="Show"><button class="${stockMode === 'shop' ? 'on' : ''}" data-smode="shop">Shop products</button><button class="${stockMode === 'fabrics' ? 'on' : ''}" data-smode="fabrics">Fabrics</button><button class="${stockMode === 'tools' ? 'on' : ''}" data-smode="tools">Tools &amp; materials</button></div>`;
   /* ---------- SHOP PRODUCTS: what customers see on the website ---------- */
   const SHOP_SITE = 'https://sh3wins.github.io/kartech-website/';
   const SHOP_TAGS = ['Furniture', 'Waiting seats', 'Catering equipment', 'Outdoor'];
   const SHOP_BUCKET = 'shop-photos';
   const shopImg = s => !s ? '' : /^(https?:|\/|blob:|data:)/.test(s) ? s : SHOP_SITE + s;
   const shopPath = u => { const m = String(u || '').match(/\/shop-photos\/(.+)$/); return m ? decodeURIComponent(m[1]) : null; };
+  /* ---------- FABRICS: the list of fabrics and colours, with metres in the store ---------- */
+  const fabName = f => `${f.kind} · ${f.colour}`;
+  const fsw = (hex, big) => `<i class="fab-sw ${big ? 'big' : ''}" style="background:${esc(hex || '#888')}"></i>`;
+  // a row of tappable fabric chips; returns html. The chosen one has class "on" and data-fid
+  function fabricPicker(id, selected){
+    if (!S.fabs) return `<p class="hint-sm">Run <b>update-29-fabrics.sql</b> in Supabase to pick fabrics.</p>`;
+    return `<div class="fab-pick" id="${id}"><button type="button" class="fab-c ${selected ? '' : 'on'}" data-fid="">No fabric</button>${S.fabs.map(f => `<button type="button" class="fab-c ${selected === f.id ? 'on' : ''}" data-fid="${f.id}">${fsw(f.hex)}${esc(fabName(f))}${+f.metres <= +f.low_at ? ' <small>(low)</small>' : ''}</button>`).join('')}</div>`;
+  }
+  function bindFabricPicker(root, id){ const el = root.querySelector('#' + id); if (!el) return () => null;
+    el.addEventListener('click', e => { const b = e.target.closest('[data-fid]'); if (!b) return; el.querySelectorAll('.fab-c').forEach(x => x.classList.toggle('on', x === b)); });
+    return () => { const on = el.querySelector('.fab-c.on'); return on && on.dataset.fid ? on.dataset.fid : null; }; }
+  function viewFabrics(){
+    if (!S.fabs) return `${stockToggle()}<div class="d-head anim"><div><h1>Fabrics</h1></div></div><div class="card"><p>Run <b>update-29-fabrics.sql</b> in Supabase to keep a list of fabrics and colours.</p></div>`;
+    const low = S.fabs.filter(f => +f.metres <= +f.low_at);
+    const kinds = [...new Set(S.fabs.map(f => f.kind))];
+    return `${stockToggle()}
+      <div class="d-head anim" style="--i:0"><div><h1>Fabrics</h1><p class="sub" style="margin:0">Every fabric and colour, with the metres in the store. You pick from this list on orders and on shop products.</p></div>
+        <span class="st-btns"><button class="btn" data-fabric="">+ Add fabric</button></span></div>
+      ${low.length ? `<p class="sp-note anim" style="--i:1">⚠ Running low: ${low.map(f => `<b>${esc(fabName(f))}</b> (${+(+f.metres).toFixed(1)} m)`).join(', ')}</p>` : ''}
+      ${kinds.map((k, ki) => `<h3 class="fab-kind anim" style="--i:${ki + 2}">${esc(k)}</h3><div class="fab-grid">${S.fabs.filter(f => f.kind === k).map(f => `<button class="fab-card anim ${+f.metres <= +f.low_at ? 'low' : ''}" style="--i:${ki + 2}" data-fabric="${f.id}">
+          ${fsw(f.hex, true)}<span><b>${esc(f.colour)}</b><small>${+(+f.metres).toFixed(1)} m in store${+f.metres <= +f.low_at ? ' · low' : ''}</small></span></button>`).join('')}</div>`).join('')
+        || '<p class="empty">No fabrics yet. Tap + Add fabric.</p>'}`;
+  }
+  function fabricModal(id){
+    if (!S.fabs) return toast('Run update-29-fabrics.sql in Supabase first.');
+    const f = id ? S.fabs.find(x => x.id === id) : { kind:'', colour:'', hex:'#1F1F1F', metres:0, low_at:5 };
+    const kinds = [...new Set(S.fabs.map(x => x.kind))];
+    const s = openModal(`<h2>${id ? esc(fabName(f)) : 'Add a fabric'}</h2>
+      <div class="row2"><label class="field"><span>Type of fabric</span><input id="fbKind" list="fbKinds" maxlength="60" value="${esc(f.kind)}" placeholder="e.g. Leatherette"><datalist id="fbKinds">${kinds.map(k => `<option value="${esc(k)}">`).join('')}</datalist></label>
+        <label class="field"><span>Colour</span><input id="fbCol" maxlength="60" value="${esc(f.colour)}" placeholder="e.g. Red"></label></div>
+      <div class="field"><span>Colour swatch</span><div class="fab-hex"><input type="color" id="fbHex" value="${esc(f.hex)}"><small>Tap to pick the colour that looks closest</small></div></div>
+      <div class="row2"><label class="field"><span>Metres in the store</span><input id="fbM" type="number" min="0" step="0.5" inputmode="decimal" value="${+(+f.metres).toFixed(1)}"></label>
+        <label class="field"><span>Warn me below (metres)</span><input id="fbLow" type="number" min="0" step="1" inputmode="decimal" value="${+f.low_at}"></label></div>
+      ${id ? `<div class="field"><span>Quick change</span><div class="fab-q">${[-5, -2, -1].map(n => `<button type="button" class="btn sm line" data-fm="${n}">Used ${-n} m</button>`).join('')}${[10, 20, 50].map(n => `<button type="button" class="btn sm line" data-fm="${n}">Bought ${n} m</button>`).join('')}</div></div>` : ''}
+      <p id="fbErr" style="color:var(--red);min-height:18px;font-size:13px"></p>
+      <div class="actions" style="justify-content:space-between">${id ? '<button class="btn red line" id="fbOff">Remove from list</button>' : '<span></span>'}
+        <span style="display:flex;gap:10px"><button class="btn line" data-x>Cancel</button><button class="btn" id="fbSave">${id ? 'Save' : 'Add fabric'}</button></span></div>`);
+    s.querySelectorAll('[data-fm]').forEach(b => b.onclick = () => { const m = s.querySelector('#fbM'); m.value = Math.max(0, (parseFloat(m.value) || 0) + Number(b.dataset.fm)); });
+    const save = async extra => {
+      const body = Object.assign({ id: id || null, kind: s.querySelector('#fbKind').value, colour: s.querySelector('#fbCol').value, hex: s.querySelector('#fbHex').value,
+        metres: parseFloat(s.querySelector('#fbM').value) || 0, low_at: parseFloat(s.querySelector('#fbLow').value) || 0 }, extra || {});
+      const { error } = await db.rpc('kt_save_fabric', { p: body });
+      if (error) return s.querySelector('#fbErr').textContent = errMsg(error);
+      closeModal(); toast(extra ? `${fabName(f)} removed from the list` : `${body.kind} · ${body.colour} saved`); await load(); };
+    s.querySelector('#fbSave').onclick = () => save();
+    const off = s.querySelector('#fbOff'); let sure = false;
+    if (off) off.onclick = () => { if (!sure){ sure = true; off.textContent = 'Tap again to remove'; return; } save({ active:false }); };
+  }
+
   function viewShop(){
     if (!S.prods) return `${stockToggle()}<div class="d-head anim"><div><h1>Shop products</h1></div></div>
       <div class="card"><p>Run <b>update-26-shop-products.sql</b> in Supabase to manage the website shop from here.</p></div>`;
@@ -1813,6 +1933,7 @@
       <label class="field"><span>Where it's used</span><input id="spSpace" maxlength="80" value="${esc(d.space || '')}" placeholder="e.g. Bars & cafés"></label>
       <label class="field"><span>Material</span><input id="spMat" maxlength="160" value="${esc(d.material || '')}" placeholder="e.g. Steel frame, leatherette seat"></label>
       <label class="field"><span>About this piece</span><textarea id="spAbout" rows="3" maxlength="1500" placeholder="What it is, sizes, colours you can make it in…">${esc(d.about || '')}</textarea></label>
+      ${S.fabs && S.fabs.length ? `<div class="field"><span>Colours customers can choose <em>(tap to tick)</em></span><div class="fab-pick multi" id="spFab">${S.fabs.map(f => `<button type="button" class="fab-c ${(d.finishes || []).some(x => x.name === fabName(f)) ? 'on' : ''}" data-fname="${esc(fabName(f))}" data-fhex="${esc(f.hex)}">${fsw(f.hex)}${esc(fabName(f))}</button>`).join('')}</div></div>` : ''}
       <label class="field"><span>Availability</span><input id="spAv" maxlength="60" value="${esc(d.availability || '')}" placeholder="In stock, or Made to order"></label>
       <label class="sp-show"><input type="checkbox" id="spActive" ${d.active ? 'checked' : ''}> Show on the website</label>
       <div class="sp-act">
@@ -1832,6 +1953,7 @@
     sc.addEventListener('click', async e => {
       if (e.target === sc || e.target.closest('[data-x]') || e.target.closest('#spCancel')){ tidy(fresh.filter(u => !(orig && orig.images.includes(u)))); return; }
       const t = e.target.closest('[data-tag]'); if (t){ t.classList.toggle('on'); return; }
+      const fc = e.target.closest('#spFab [data-fname]'); if (fc){ fc.classList.toggle('on'); return; }
       if (e.target.closest('#spAdd')) return q('#spFile').click();
       const mn = e.target.closest('[data-main]'); if (mn){ const [x] = d.images.splice(+mn.dataset.main, 1); d.images.unshift(x); return drawPics(); }
       const rm = e.target.closest('[data-rm]'); if (rm){ d.images.splice(+rm.dataset.rm, 1); return drawPics(); }
@@ -1848,6 +1970,8 @@
       const body = { id: orig ? orig.id : null, name, price: priceTxt || null, images: d.images,
         tags: [...sc.querySelectorAll('[data-tag].on')].map(b => b.dataset.tag), space: q('#spSpace').value, material: q('#spMat').value,
         about: q('#spAbout').value, availability: q('#spAv').value, active: q('#spActive').checked };
+      if (q('#spFab')){ const kept = (d.finishes || []).filter(x => !S.fabs.some(f => fabName(f) === x.name));
+        body.finishes = kept.concat([...sc.querySelectorAll('#spFab [data-fname].on')].map(b => ({ name: b.dataset.fname, color: b.dataset.fhex }))); }
       sv.disabled = true; sv.textContent = 'Saving…';
       const { error } = await db.rpc('kt_save_product', { p: body });
       if (error){ sv.disabled = false; sv.textContent = orig ? 'Save' : 'Add to shop'; return toast(errMsg(error)); }
@@ -1873,6 +1997,7 @@
 
   function viewStock(){
     if (stockMode === 'shop') return viewShop();
+    if (stockMode === 'fabrics') return viewFabrics();
     const mats = S.mats.filter(m => m.active);
     const watch = watchList();
     const moveTxt = x => { const m = M(x.mat), w = x.worker && W(x.worker), o = x.order && O(x.order); if (!m) return '';

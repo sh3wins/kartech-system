@@ -10,7 +10,7 @@ A phone-first system that runs **Kartech Engineering's** metal workshop in Nairo
 
 | Page | Who uses it | What it does |
 |---|---|---|
-| `owner.html` | **The owner**, on her phone or laptop | Today's dashboard with sales demand charts, the website shop (add products, photos and prices), orders (shop, website and manager orders kept apart), "Who's doing what", stock, workers, money (invoices, PDF receipts, balances), history, Bin, settings |
+| `owner.html` | **The owner**, on her phone or laptop | Today's dashboard with sales demand charts, the website shop (add products, photos and prices), messages with each worker, orders (shop, website and manager orders kept apart), "Who's doing what", stock, workers, money (invoices, PDF receipts, balances), history, Bin, settings |
 | `station.html` | **The shared workshop computer** | Workers tap their name and PIN to see only their own job and mark it finished. The **Manager** (behind a code) ticks attendance, hands out tools and materials, gives and changes jobs, marks jobs done, takes sales and sends clients their Order Room link or QR code |
 | `room.html` | **Clients**, from a link or QR code | Their own **Order Room**: progress, pictures, messages, approving the design, "I've paid the deposit". Clients can also find their order by phone number |
 | `check.html` | **Anyone** holding a Kartech receipt | Scanning the QR code on a receipt shows whether it is genuine |
@@ -57,7 +57,7 @@ kartech-system/
 │   ├── check-security.sql   checks who can see what
 │   └── old/                 retired files, do not use
 ├── tests/
-│   └── business-rules.sql   35 tests for money, orders and permissions
+│   └── business-rules.sql   44 tests for money, orders and permissions
 └── docs/                SETUP, DATABASE, SECURITY, TESTING guides
 ```
 

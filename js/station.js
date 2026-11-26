@@ -8,6 +8,8 @@
   const v = $('#stView');
   let tools = null, workers = [], pinFor = null, pin = '', token = null, me = null, job = null, mats = [];
   let probOpen = false, probReason = null, idleT = null, idleLeft = 0, pollT = null, sending = false;
+  let unread = {}, msgs = null, msgOpen = false, draft = '';
+  let fabs = null, jobFab = null;   // fabrics (update-29)   // messages from the owner (update-28)
 
   if (!db){ v.innerHTML = '<h1>Not set up yet</h1><p class="lead">Add the Supabase keys in js/config.js.</p>'; return; }
 
@@ -39,8 +41,9 @@
     if (error && /ws_station_board|function/i.test(errMsg(error))) ({ data, error } = await db.rpc('ws_station_workers'));
     if (!error) announceJobs(data);
     if (error){ v.innerHTML = `<h1>Can't reach the system</h1><p class="lead">${esc(errMsg(error))}</p><button class="giant done" id="retry">Try again</button>`; return; }
-    workers = data; await loadTools(); render();
+    workers = data; await loadTools(); await loadUnread(); render();
   }
+  async function loadUnread(){ const r = await db.rpc('ws_station_unread'); const before = JSON.stringify(unread); unread = r.error ? {} : (r.data || {}); return before !== JSON.stringify(unread); }
 
 
   /* ---------- new jobs: shown next to each name + said out loud ---------- */
@@ -69,7 +72,8 @@
   setInterval(async () => { if (me || fm || document.visibilityState !== 'visible' || !workers.length && !prevJob) return;
     const { data, error } = await db.rpc('ws_station_board'); if (error) return;
     announceJobs(data);
-    if (JSON.stringify(data) !== JSON.stringify(workers)){ workers = data; if (!me && !fm) render(); } }, 10000);
+    const um = await loadUnread();
+    if (JSON.stringify(data) !== JSON.stringify(workers) || um){ workers = data; if (!me && !fm) render(); } }, 10000);
 
 
   /* ---------- colour + emoji for each trade (makes the screen friendlier) ---------- */
@@ -203,6 +207,7 @@
           <label class="no-f"><span>Ready by</span><input class="fm-in" type="date" data-nf="deadline" value="${esc(n.deadline)}"></label>
           <div class="no-f"><span>How urgent</span><div class="fm-chips">${['normal','urgent'].map(u => `<button class="fm-chip ${n.urgency === u ? 'on' : ''}" data-nurg="${u}">${u === 'normal' ? 'Normal' : '⚡ Urgent'}</button>`).join('')}</div></div>
         </div>
+        ${fabs && fabs.length ? `<div class="no-f anim" style="--i:2"><span>🧵 Fabric &amp; colour</span><div class="fm-chips fab-chips"><button class="fm-chip ${n.fabric ? '' : 'on'}" data-nfab="">No fabric</button>${fabs.map(f => `<button class="fm-chip ${n.fabric === f.id ? 'on' : ''}" data-nfab="${f.id}"><i class="fab-sw" style="background:${esc(f.hex)}"></i>${esc(f.kind)} · ${esc(f.colour)}</button>`).join('')}</div></div>` : ''}
         <label class="no-f anim" style="--i:2"><span>Exact details: size, colour, material</span><textarea class="fm-in" data-nf="notes" rows="3" placeholder="e.g. 75 cm high, black frame, red seat">${esc(n.notes)}</textarea></label>
         <div class="st-group anim" style="--i:3"><h4>📐 Pictures of what to make</h4>
           <div class="no-pics">${n.files.map((f, i) => `<div class="ph"><img src="${f._u}" alt=""><button class="ph-rm" data-npx="${i}">✕</button></div>`).join('')}
@@ -256,9 +261,12 @@
     if (b.id === 'fmBack' && fm.view === 'qr'){ const back = (fm.qr && fm.qr.back) || 'home'; fm.qr = null; fm.view = back; return renderForeman(); }
     if (b.id === 'fmBack'){ fm.view = 'home'; fm.pick = null; await fmLoad(); return renderForeman(); }
     if (b.id === 'fmNewOrder'){ const d = new Date(); d.setDate(d.getDate() + 7);
-      fm.no = { customer:'', phone:'', item:'', qty:'1', deadline: d.toLocaleDateString('en-CA'), urgency:'normal', notes:'', files:[], stages: STAGES.map(x => x.id), err:'' }; fm.view = 'neworder'; return renderForeman(); }
+      fm.no = { customer:'', phone:'', item:'', qty:'1', deadline: d.toLocaleDateString('en-CA'), urgency:'normal', notes:'', files:[], stages: STAGES.map(x => x.id), err:'', fabric:null }; fm.view = 'neworder';
+      if (fabs === null){ db.from('kt_fabrics').select('id,kind,colour,hex').eq('active', true).order('kind').order('colour').then(r => { fabs = r.error ? false : r.data; if (fm && fm.view === 'neworder') renderForeman(); }); }
+      return renderForeman(); }
     if (b.dataset.nst){ const x = b.dataset.nst, st = fm.no.stages; fm.no.stages = st.includes(x) ? st.filter(y => y !== x) : STAGES.map(z => z.id).filter(z => st.includes(z) || z === x); return renderForeman(); }
     if (b.dataset.nurg){ fm.no.urgency = b.dataset.nurg; return renderForeman(); }
+    if (b.dataset.nfab !== undefined){ fm.no.fabric = b.dataset.nfab || null; return renderForeman(); }
     if (b.dataset.npx){ fm.no.files.splice(+b.dataset.npx, 1); return renderForeman(); }
     if (b.id === 'noSave'){ const n = fm.no;
       if (!n.customer.trim() || !n.item.trim()){ n.err = 'Write the customer and what they want.'; return renderForeman(); }
@@ -269,6 +277,7 @@
       const { data, error } = await db.rpc('ws_foreman_create_order', { p_pin: fm.pin, p: { customer: n.customer.trim(), item: n.item.trim(), qty: Math.max(1, parseInt(n.qty, 10) || 1), deadline: n.deadline || null, urgency: n.urgency, notes, stages: n.stages } });
       if (error){ n.err = /ws_foreman_create_order/.test(errMsg(error)) ? 'The owner needs to run update-15-sales.sql in Supabase first.' : errMsg(error); return renderForeman(); }
       let bad = 0;
+      if (n.fabric) await db.rpc('ws_foreman_set_fabric', { p_pin: fm.pin, p_order: data.id, p_fabric: n.fabric });
       for (const f of n.files){ b.textContent = 'Adding pictures…';
         try { if (!db.storage) throw 0; const blob = await shrinkPic(f), path = `${data.id}/${Date.now()}.jpg`;
           const up = await db.storage.from('kartech-photos').upload(path, blob, { contentType:'image/jpeg', upsert:false }); if (up.error) throw up.error;
@@ -399,16 +408,20 @@
         ${sound && navigator.userActivation && !navigator.userActivation.hasBeenActive ? '<p class="snd-hint anim">🔊 Tap anywhere once so the screen can call out new jobs.</p>' : ''}
         ${workers.length ? STAGES.map((s, gi) => { const ws = workers.filter(w => w.stage === s.id); return ws.length ? `<div class="st-group trade anim" style="--i:${gi + 2};${tc(s.id)}"><h4><span class="tr-ic">${trade(s.id)[1]}</span>${s.name}</h4><div class="names">${ws.map(w => { const j = w.job;
           const line = j ? `<small class="nj ${j.status === 'assigned' ? 'new' : ''}">${j.status === 'assigned' ? '<em>NEW</em>' : '▶'} ${esc(j.ref)} · ${esc(stageName(j.stage))}${j.with ? ' · with ' + esc(j.with) : ''}</small>` : w.job === null ? `<small class="nj free">Free${w.next ? ` · ${w.next} lined up` : ''}</small>` : '';
-          return `<button class="name tn ${j && j.status === 'assigned' ? 'has-new' : ''}" data-who="${w.id}" style="${tc(w.stage)}"><span class="av">${esc(w.name.charAt(0))}</span><span class="nm">${esc(w.name)}${line}</span></button>`; }).join('')}</div></div>` : ''; }).join('')
+          return `<button class="name tn ${j && j.status === 'assigned' ? 'has-new' : ''}" data-who="${w.id}" style="${tc(w.stage)}"><span class="av">${esc(w.name.charAt(0))}</span><span class="nm">${esc(w.name)}${line}${unread[w.id] ? `<small class="nj msgnew">💬 ${unread[w.id] === 1 ? 'New message' : unread[w.id] + ' new messages'} from the owner</small>` : ''}</span></button>`; }).join('')}</div></div>` : ''; }).join('')
           : '<div class="sw-card nowork anim" style="--i:2"><p class="big">No workers yet</p><p>The owner adds workers in the Kartech app.</p></div>'}`;
       return;
     }
     const t = job && job.task, o = job && job.order;
     const head = `<div class="st-head anim"><div><h1>Hello, ${esc(job ? job.worker.name : '')} <span class="wave">👋</span></h1><p class="lead">${job ? stageName(job.worker.stage) : ''}</p></div>
-      <div class="st-out"><button class="btn line" id="stOut">Sign out</button><p class="idle" id="idleTxt"></p></div></div>`;
+      <div class="st-out"><span class="st-outb">${msgs !== false ? `<button class="btn ${msgOpen ? '' : 'line'} st-msgb" id="stMsg">💬 Messages${!msgOpen && unread[me] ? ` <i>${unread[me]}</i>` : ''}</button>` : ''}<button class="btn line" id="stOut">Sign out</button></span><p class="idle" id="idleTxt"></p></div></div>`;
+    const msgPanel = msgOpen ? `<div class="sw-card chatw anim" style="--i:1"><div class="chatw-h"><p class="k">💬 Messages with the owner</p><button class="btn line" id="stMsgClose">Close</button></div>
+        <div class="chatw-t" id="stThread"></div>
+        <div class="chatw-q">${['Okay 👍', 'On my way', 'Done ✓', 'I need help'].map(q => `<button type="button" data-mq="${q}">${q}</button>`).join('')}</div>
+        <div class="chatw-f"><textarea id="stMsgIn" rows="2" maxlength="1000" placeholder="Write to the owner…"></textarea><button class="giant go" id="stMsgSend">Send</button></div></div>` : '';
     if (!t){
-      v.innerHTML = head + `<div class="sw-card nowork anim" style="--i:1"><div class="dots"><i></i><i></i><i></i></div><p class="big">No job right now</p><p>The owner can see you're free. Your next job will show here as soon as it's ready.</p></div>`;
-      return;
+      v.innerHTML = head + msgPanel + `<div class="sw-card nowork anim" style="--i:1"><div class="dots"><i></i><i></i><i></i></div><p class="big">No job right now</p><p>The owner can see you're free. Your next job will show here as soon as it's ready.</p></div>`;
+      drawThread(); return;
     }
     const working = t.status === 'working';
     const card = `<div class="sw-card cur tcard anim" style="--i:1;${tc(t.stage)}">
@@ -421,6 +434,7 @@
         ${t.approved ? `<p class="approved">✓ <b>Customer approved this design</b> · ${new Date(t.approved).toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short' })}</p>` : ''}
         ${t.deposit ? `<p class="approved">✓ <b>Deposit confirmed</b> · you can start</p>` : ''}
         <div class="tags"><span class="tag u-${o.urgency}">${o.urgency === 'normal' ? 'Normal' : '● ' + URG_NAME[o.urgency] + ' priority'}</span><span class="tag due">◷ Due ${fmtDay(new Date(o.deadline + 'T17:00'))}</span><span class="tag">Then: ${job.after ? stageName(job.after) : 'Delivery'}</span></div>
+        ${jobFab && jobFab.name ? `<div class="note fabn">🧵 Fabric: <i class="fab-sw big" style="background:${esc(jobFab.hex || '#888')}"></i><b>${esc(jobFab.name)}</b></div>` : ''}
         ${o.notes ? `<div class="note">📝 ${esc(o.notes)}</div>` : ''}
         ${pics.length ? `<div class="pics"><p class="k">📐 What to make · tap to see big</p><div class="pics-row">${pics.map((u, i) => `<button class="pic" data-pic="${i}"><img src="${esc(u)}" alt="Picture ${i + 1}"></button>`).join('')}</div></div>` : ''}
         ${mats.length ? `<div class="note mats-given"><b>📦 Materials given to you for this job</b><br>${mats.map(m => `${+(+m.qty).toFixed(2)} ${esc(m.unit)} ${esc(m.name)}`).join(' · ')}<br><small>Bring anything left over back to the store.</small></div>` : ''}
@@ -432,7 +446,35 @@
     const help = probReason ? `<div class="sw-card help anim"><p class="q">${esc(probReason)}: has your work stopped?</p><div class="stop2"><button class="yes" data-stop="1">Yes, I can't continue</button><button class="no" data-stop="0">No, I can keep going</button></div></div>`
       : probOpen ? `<div class="sw-card help anim"><p class="q">What's the problem?</p><div class="probs">${['Material missing','Machine problem','Need instructions','Something else'].map(r => `<button data-prob="${r}">${r}</button>`).join('')}</div></div>`
       : t.problem_reason ? '' : `<p class="needhelp anim" style="--i:3">Need help? <button id="stProb">Report a problem</button></p>`;
-    v.innerHTML = head + `<div class="sw-grid">${card}${side}</div>` + help;
+    v.innerHTML = head + msgPanel + `<div class="sw-grid">${card}${side}</div>` + help;
+    drawThread();
+  }
+
+  /* ---------- messages with the owner ---------- */
+  function drawThread(){
+    const box = $('#stThread'); if (!box) return;
+    const list = msgs || [];
+    box.innerHTML = list.length ? list.map(m => `<div class="wb ${m.me ? 'me' : 'them'}"><p>${esc(m.body).replace(/\n/g, '<br>')}</p><small>${m.me ? 'You' : 'Owner'} · ${fmTime(m.at)}</small></div>`).join('')
+      : `<p class="muted" style="margin:auto">${msgs === null ? 'Loading…' : 'No messages yet. You can write to the owner here.'}</p>`;
+    box.scrollTop = box.scrollHeight;
+    const inp = $('#stMsgIn'); if (inp && !inp.dataset.on){ inp.dataset.on = '1'; if (draft && !inp.value) inp.value = draft; inp.addEventListener('input', () => { draft = inp.value; resetIdle(); });
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); sendMsg(); } }); }
+  }
+  async function loadMsgs(){
+    if (!token) return;
+    const { data, error } = await db.rpc('ws_my_msgs', { p_token: token });
+    if (error){ if (/ws_my_msgs/.test(errMsg(error))) msgs = false; return; }
+    const changed = JSON.stringify(data) !== JSON.stringify(msgs); msgs = data;
+    if (unread[me]){ unread[me] = 0; }
+    if (changed) drawThread();
+  }
+  async function sendMsg(){
+    const inp = $('#stMsgIn'); if (!inp) return; const body = inp.value.trim(); if (!body) return inp.focus();
+    const b = $('#stMsgSend'); if (b) b.disabled = true;
+    const { error } = await db.rpc('ws_my_msg_send', { p_token: token, p_body: body });
+    if (b) b.disabled = false;
+    if (error){ if (/Signed out/i.test(error.message)) return signOut(); return toast(errMsg(error)); }
+    inp.value = ''; draft = ''; toast('Sent to the owner ✓'); await loadMsgs(); inp.focus();
   }
 
   function cheer(text){
@@ -447,13 +489,15 @@
 
   async function refreshJob(){
     if (!token) return;
+    if (msgOpen) loadMsgs();
     const { data, error } = await db.rpc('ws_my_job', { p_token: token });
     if (error){ if (/Signed out/i.test(error.message)) return signOut(); $('#live').classList.add('off'); return; }
     $('#live').classList.remove('off');
     const mr = data && data.task ? await db.rpc('ws_my_materials', { p_token: token }) : { data: [] };
-    const before = JSON.stringify([job, mats, pics]); job = data; mats = mr.error ? [] : (mr.data || []);
+    const fr = data && data.task ? await db.rpc('ws_job_fabric', { p_token: token }) : { data: null };
+    const before = JSON.stringify([job, mats, pics, jobFab]); job = data; mats = mr.error ? [] : (mr.data || []); jobFab = fr.error ? null : fr.data;
     await loadPics();
-    if (JSON.stringify([job, mats, pics]) !== before && !probOpen && !probReason) render();
+    if (JSON.stringify([job, mats, pics, jobFab]) !== before && !probOpen && !probReason) render();
   }
 
   /* ---------- pictures of what to make (from the owner) ---------- */
@@ -516,7 +560,7 @@
     }, 1000);
   }
   async function signOut(){
-    const tk = token; me = null; token = null; job = null; mats = []; pinFor = null; pin = ''; probOpen = false; probReason = null;
+    const tk = token; me = null; token = null; job = null; mats = []; pinFor = null; pin = ''; probOpen = false; probReason = null; msgs = null; msgOpen = false; draft = '';
     clearInterval(idleT); clearInterval(pollT);
     if (tk) db.rpc('ws_logout', { p_token: tk });
     await loadNames();
@@ -542,12 +586,17 @@
       b.disabled = true;
       const { data, error } = await db.rpc('ws_tap_in', { p_worker: b.dataset.who });
       if (error){ b.disabled = false; toast(errMsg(error)); return; }
-      token = data; me = b.dataset.who;
+      token = data; me = b.dataset.who; msgs = null; msgOpen = !!unread[me];
       await refreshJob(); render(); resetIdle();
+      if (msgOpen){ await loadMsgs(); render(); }
       pollT = setInterval(refreshJob, 8000);
       return;
     }
     if (b.id === 'stOut') return signOut();
+    if (b.id === 'stMsg'){ msgOpen = !msgOpen; if (msgOpen){ msgs = msgs || null; render(); await loadMsgs(); render(); setTimeout(() => { const i = $('#stMsgIn'); if (i) i.focus(); }, 60); } else render(); return; }
+    if (b.id === 'stMsgClose'){ msgOpen = false; render(); return; }
+    if (b.id === 'stMsgSend') return sendMsg();
+    if (b.dataset.mq){ const i = $('#stMsgIn'); if (i){ i.value = b.dataset.mq; sendMsg(); } return; }
     if (b.id === 'stStart'){ b.disabled = true; if (await call('ws_start')) toast('Started. Good work!'); return; }
     if (b.id === 'stDone'){
       if (b.dataset.sure !== '1'){ b.dataset.sure = '1'; b.textContent = 'Tap again to confirm'; b.classList.add('sure'); return; }

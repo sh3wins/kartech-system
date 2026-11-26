@@ -48,8 +48,10 @@ The system shares one Supabase project with the Kartech **website**. File `00` c
 | 25 | `update-25-lock-helpers.sql` | close three small side doors (found by check-security.sql) |
 | 26 | `update-26-shop-products.sql` | the owner runs the website shop from her app (products, prices, photos) |
 | 27 | `update-27-relink-invoices.sql` | an order brought back from the Bin gets its invoice back |
+| 28 | `update-28-messages.sql` | messages between the owner and each worker |
+| 29 | `update-29-fabrics.sql` | fabrics and colours: a fabric list with metres, a fabric on each order, colours on shop products |
 
-The order matters: each update builds on the ones before it. Updates 1 to 27 have been tested on a brand-new database, in this order, with no errors. All 35 business-rule tests and all security checks pass afterwards.
+The order matters: each update builds on the ones before it. Updates 1 to 29 have been tested on a brand-new database, in this order, with no errors. All 44 business-rule tests and all security checks pass afterwards.
 
 ### Helper files (read-only, they change nothing)
 
@@ -57,7 +59,7 @@ The order matters: each update builds on the ones before it. Updates 1 to 27 hav
 |---|---|
 | `which-updates.sql` | One row per update: **yes** or **MISSING** |
 | `check-security.sql` | Who can see what. See [SECURITY.md](SECURITY.md) |
-| `../tests/business-rules.sql` | 35 tests of the money and order rules. See [TESTING.md](TESTING.md) |
+| `../tests/business-rules.sql` | 39 tests of the money and order rules. See [TESTING.md](TESTING.md) |
 
 ### Retired files
 
@@ -66,7 +68,7 @@ The order matters: each update builds on the ones before it. Updates 1 to 27 hav
 ## Rules for database changes
 
 1. **Never re-run a single old update on its own** (for example only `update-12`). Later updates replaced some of its functions, and re-running it would bring back the older versions. To repair a project, run `INSTALL-ALL.sql` from the top: it always ends on the newest version of everything.
-2. **New change = new numbered file.** The next one is `update-28-….sql`. Never edit an update that has already been run on the live project.
+2. **New change = new numbered file.** The next one is `update-29-….sql`. Never edit an update that has already been run on the live project.
 3. Every update must be **safe to run twice** (`create or replace`, `if not exists`, `on conflict do nothing`).
 4. Any function that changes data must start with a permission check:
    - owner only: `perform public.ws_need_owner();`
@@ -106,4 +108,5 @@ Invoices and receipts are **never stored** anywhere. The PDF is made on the owne
 | `kt_invoices`, `kt_payments`, `kt_counters` | **Money**: owner only, see SECURITY.md |
 | `ws_settings` | Manager code (scrambled), M-Pesa number, business details |
 | `ws_stations` | Which login is the workshop computer |
+| `ws_messages` | Messages between the owner and each worker. Only the owner reads the table; a worker sees only their own, after signing in |
 | `kt_products` | The website shop: name, public price, photos, category. Anyone can read visible products; only the owner can change them |

@@ -310,3 +310,32 @@ textarea.fm-in{resize:vertical;font-weight:600}
 .fm-donebtn.sure{background:#B08A4F;animation:fmPulse 1s ease-in-out infinite}
 @keyframes fmPulse{50%{box-shadow:0 0 0 6px rgba(176,138,79,.25)}}
 @media (max-width:860px){.fm-donebtn{width:100%}}
+
+/* ---------- messages with the owner ---------- */
+.st-outb{ display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end }
+.st-msgb i{ font-style:normal; background:#E5484D; color:#fff; border-radius:999px; padding:1px 8px; margin-left:4px; font-size:.85em }
+.nj.msgnew{ color:#fff !important; background:#E5484D; border-radius:999px; padding:3px 10px; margin-top:4px; display:inline-block; font-weight:700; animation:msgPulse 1.6s ease-in-out infinite }
+@keyframes msgPulse{ 50%{ box-shadow:0 0 0 5px rgba(229,72,77,.25) } }
+@media (prefers-reduced-motion:reduce){ .nj.msgnew{ animation:none } }
+.chatw{ margin-bottom:18px; display:flex; flex-direction:column; gap:12px }
+.chatw-h{ display:flex; justify-content:space-between; align-items:center; gap:10px }
+.chatw-h .k{ margin:0 }
+.chatw-t{ max-height:320px; min-height:120px; overflow-y:auto; display:flex; flex-direction:column; gap:10px; padding:12px; border-radius:16px; background:rgba(0,0,0,.04) }
+.wb{ max-width:82%; padding:10px 14px 7px; border-radius:18px; background:#fff; align-self:flex-start; color:#10261F; box-shadow:0 1px 1px rgba(0,0,0,.06) }
+.wb.me{ align-self:flex-end; background:#185844; color:#fff; border-bottom-right-radius:6px }
+.wb.them{ border-bottom-left-radius:6px }
+.wb p{ margin:0; font-size:19px; line-height:1.35; overflow-wrap:anywhere }
+.wb small{ display:block; margin-top:4px; font-size:13px; opacity:.7; text-align:right }
+.chatw-q{ display:flex; gap:8px; flex-wrap:wrap }
+.chatw-q button{ border:2px solid rgba(0,0,0,.12); background:#fff; color:#10261F; border-radius:999px; padding:10px 16px; font:inherit; font-size:17px; font-weight:700; cursor:pointer }
+.chatw-f{ display:flex; gap:10px; align-items:stretch }
+.chatw-f textarea{ flex:1; resize:none; border:2px solid rgba(0,0,0,.15); border-radius:16px; padding:12px 14px; font:inherit; font-size:18px; color:#10261F; background:#fff }
+.chatw-f .giant{ width:auto; min-width:130px; margin:0 }
+@media (max-width:860px){ .chatw-f{ flex-direction:column } .chatw-f .giant{ width:100% } }
+.st-msgb:not(.line){ background:#185844 !important; color:#fff !important; border-color:#185844 !important }
+.st-msgb.line{ color:#10261F !important }
+/* fabrics */
+.fab-sw{ display:inline-block; width:16px; height:16px; border-radius:50%; border:1px solid rgba(0,0,0,.2); vertical-align:-3px; margin-right:7px }
+.fab-sw.big{ width:30px; height:30px; border-radius:8px; vertical-align:-9px; margin:0 8px }
+.fab-chips{ max-height:200px; overflow-y:auto }
+.note.fabn{ font-size:1.15em }
