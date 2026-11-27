@@ -1905,14 +1905,51 @@
   const rpLike = (t, c) => { t = rpStem(t); c = rpStem(c); if (t === c) return true; if (t.length >= 4 && c.startsWith(t)) return true;
     const lim = c.length >= 7 ? 2 : c.length >= 4 ? 1 : 0; return lim > 0 && rpLev(t, c) <= lim; };
   const rpToks = x => String(x).toLowerCase().replace(/(\d)([a-z])/g, '$1 $2').replace(/[^a-z0-9.\-&]+/g, ' ').split(' ').filter(Boolean);
+  /* metal described the workshop way: gauge (16, 16g, gauge 16), size (1 inch, 1", 1½, 3/4", 2x1, 40x40mm) and shape (round, square, rectangular, flat, angle, sheet) */
+  const RP_SHAPES = [[/\b(round|chs|circular)\b/, 'round'], [/\b(square|sq|shs)\b/, 'square'], [/\b(rectangular|rectangle|rect|rhs)\b/, 'rect'],
+    [/\b(flat ?bar|flat)\b/, 'flat'], [/\b(angle ?line|angle ?iron|angle)\b/, 'angle'], [/\b(sheet|sheets|plate|plates|mabati)\b/, 'sheet'], [/\b(round ?bar|rod bar|solid bar)\b/, 'bar']];
+  const RP_SHAPE_NAME = { round:'Round tube', square:'Square tube', rect:'Rectangular tube', flat:'Flat bar', angle:'Angle line', sheet:'Metal sheet', bar:'Round bar', tube:'Tube' };
+  const rpFrac = x => { x = String(x).trim().replace(/\s+/g, ' ');
+    const m = x.match(/^(\d+) (\d)\/(\d)$/); if (m) x = String(+m[1] + m[2] / m[3]); else if (/^\d\/\d$/.test(x)){ const [a, b] = x.split('/'); x = String(a / b); }
+    const n = parseFloat(x); if (isNaN(n)) return x; const w = Math.floor(n), f = Math.round((n - w) * 8) / 8;
+    const F = { 0:'', 0.25:'¼', 0.5:'½', 0.75:'¾', 0.125:'⅛', 0.375:'⅜', 0.625:'⅝', 0.875:'⅞' }[f];
+    return F == null ? String(n) : (w ? w : '') + F || '0'; };
+  // returns { shape, size, gauge, rest } where rest is the text with the metal description taken out (so its numbers aren't read as "how many")
+  function rpSpec(text){
+    let s = ' ' + String(text).toLowerCase().replace(/[”″]/g, '"').replace(/½/g, ' 1/2').replace(/¼/g, ' 1/4').replace(/¾/g, ' 3/4') + ' ', size = null, gauge = null, shape = null, at = -1;
+    const cut = (m, i) => { s = s.slice(0, i) + ' '.repeat(m.length) + s.slice(i + m.length); };
+    let m;
+    // 2x1, 2 x 1", 40x40mm, 1 by 1
+    if ((m = /(\d+(?:\.\d+)?)\s*(?:x|by|\*)\s*(\d+(?:\.\d+)?)\s*(mm|"|''|inch(?:es)?|in\b)?/.exec(s))){
+      const mm = m[3] === 'mm' || (!m[3] && (+m[1] > 6 || +m[2] > 6));
+      size = mm ? `${m[1]}x${m[2]}mm` : `${rpFrac(m[1])}x${rpFrac(m[2])}"`; at = m.index; cut(m[0], m.index); }
+    // 1 inch, 1", 1 1/2 inch, 3/4", 1.5in
+    else if ((m = /(\d+ \d\/\d|\d\/\d|\d+(?:\.\d+)?)\s*(?:"|''|inch(?:es)?\b|in\b)/.exec(s))){ size = rpFrac(m[1]) + '"'; at = m.index; cut(m[0], m.index); }
+    // 25mm
+    else if ((m = /(\d+(?:\.\d+)?)\s*mm\b/.exec(s))){ size = m[1] + 'mm'; at = m.index; cut(m[0], m.index); }
+    // gauge: 16g, 16 gauge, gauge 16, g16, 16swg
+    if ((m = /\b(\d{1,2})\s*(?:g|ga|gauge|gage|swg)\b/.exec(s)) || (m = /\b(?:gauge|gage|ga|swg|g)\s*(\d{1,2})\b/.exec(s))){ gauge = +m[1]; cut(m[0], m.index); }
+    // "16 1 inch round": a bare 8-26 right before the size is the gauge
+    else if (size && at > 0){ const before = s.slice(0, at), b = /\b(\d{1,2})\s*$/.exec(before); if (b && +b[1] >= 8 && +b[1] <= 26){ gauge = +b[1]; cut(b[0], b.index); } }
+    for (const [re, nm] of RP_SHAPES){ const x = re.exec(s); if (x){ shape = nm; cut(x[0], x.index);
+      // "1 inch round 16": a bare 8-26 just after the shape is the gauge, if another number is left for how many
+      if (!gauge && size){ const after = /^\s*(\d{1,2})\b(?!\s*(?:pcs|pieces|lengths|length|pc)\b)/.exec(s.slice(x.index + x[0].length));
+        if (after && +after[1] >= 8 && +after[1] <= 26){ const i = x.index + x[0].length + after.index, rest = s.slice(0, i) + s.slice(i + after[0].length);
+          if (/\d/.test(rest.replace(/\bkt[\s-]?\d+/g, ''))){ gauge = +after[1]; cut(after[0], i); } } }
+      break; } }
+    if (!shape && (size || gauge) && /\b(pipe|pipes|tube|tubes|tubing|chuma|metal|steel|iron)\b/.test(s)) shape = 'tube';
+    return { shape, size, gauge, rest: s.replace(/\b(pipe|pipes|tube|tubes|tubing|chuma)\b/g, ' ').trim(), metal: !!(size || gauge) && !!(shape || size) };
+  }
+  const rpSpecName = sp => `${RP_SHAPE_NAME[sp.shape || 'tube']}${sp.size ? ' ' + sp.size : ''}${sp.gauge ? ` (${sp.gauge}g)` : ''}`;
   function rpItems(){
     return S.mats.filter(m => m.active).map(m => ({ type:'mat', id:m.id, name:m.name, unit:m.unit, toks:rpToks(m.name).filter(t => !RP_STOP.has(t)) }))
       .concat((S.fabs || []).map(f => ({ type:'fab', id:f.id, name:fabName(f), unit:'m', hex:f.hex, toks:rpToks(f.kind + ' ' + f.colour).filter(t => !RP_STOP.has(t) && t !== '·') })));
   }
   function rpParse(raw){
-    const low = raw.toLowerCase(), toks = rpToks(raw), L = { raw, kind:null, qty:null, unitWord:null, item:null, cands:[], worker:null, order:null, newName:null };
-    // how many
-    const nm = low.replace(/(\d),(\d)/g, '$1$2').match(/\d+(?:\.\d+)?/); if (nm) L.qty = parseFloat(nm[0]);
+    const sp = rpSpec(raw), low = raw.toLowerCase(), L = { raw, kind:null, qty:null, unitWord:null, item:null, cands:[], worker:null, order:null, newName:null, spec: sp.metal ? sp : null };
+    const toks = rpToks(sp.metal ? sp.rest : raw);   // metal sizes and gauges are not "how many"
+    // how many (never the order number, the size or the gauge)
+    const nm = (sp.metal ? sp.rest : low).replace(/\bkt[\s-]?\d+/g, ' ').replace(/(\d),(\d)/g, '$1$2').match(/\d+(?:\.\d+)?/); if (nm) L.qty = parseFloat(nm[0]);
     else { const w = toks.find(t => RP_NUMS[t] != null); if (w) L.qty = RP_NUMS[w]; }
     // order number
     const om = low.match(/\bkt[\s-]?(\d{3,6})\b/); if (om){ const o = S.orders.find(x => x.ref.toLowerCase() === 'kt-' + om[1]); if (o) L.order = o.id; }
@@ -1931,10 +1968,19 @@
     // unit word and the item
     toks.forEach((t, i) => { if (RP_UNIT_OF[t] && !L.unitWord) { L.unitWord = RP_UNIT_OF[t]; used.add(i); } });
     const words = toks.map((t, i) => ({ t, i })).filter(x => !used.has(x.i) && !RP_STOP.has(x.t) && !/^\d/.test(x.t) && RP_NUMS[x.t] == null && !/^kt-?\d+$/.test(x.t) && x.t !== 'kt');
-    const scored = rpItems().map(c => { const hit = c.toks.filter(ct => words.some(w => rpLike(w.t, ct))).length; return { c, score: c.toks.length ? hit / c.toks.length + hit * 0.01 : 0 }; })
+    if (L.spec){   // metal: match on shape + size + gauge, not on words
+      const want = L.spec, ms = rpItems().filter(c => c.type === 'mat').map(c => ({ c, sp: rpSpec(c.name) })).filter(x => x.sp.metal)
+        .filter(x => (!want.size || x.sp.size === want.size) && (!want.gauge || !x.sp.gauge || x.sp.gauge === want.gauge)
+          && (!want.shape || want.shape === 'tube' || !x.sp.shape || x.sp.shape === 'tube' || x.sp.shape === want.shape));
+      const exact = ms.filter(x => (!want.gauge || x.sp.gauge === want.gauge) && (!want.shape || x.sp.shape === want.shape));
+      const pick = exact.length ? exact : ms;
+      if (pick.length === 1) L.item = pick[0].c; else if (pick.length > 1) L.cands = pick.map(x => x.c);
+      else { L.newName = rpSpecName(want); if (!L.unitWord || L.unitWord === 'pcs') L.unitWord = want.shape === 'sheet' ? 'sheets' : 'lengths'; }
+    }
+    const scored = L.spec ? [] : rpItems().map(c => { const hit = c.toks.filter(ct => words.some(w => rpLike(w.t, ct))).length; return { c, score: c.toks.length ? hit / c.toks.length + hit * 0.01 : 0 }; })
       .filter(x => x.score >= 0.5).sort((a, b) => b.score - a.score);
     if (scored.length){ const top = scored[0].score; L.cands = scored.filter(x => top - x.score < 0.005).map(x => x.c); if (L.cands.length === 1) L.item = L.cands[0]; }
-    if (!scored.length && words.length){ const left = words.map(x => x.t).filter(t => !RP_UNIT_OF[t]).join(' ').trim();
+    if (!L.spec && !scored.length && words.length){ const left = words.map(x => x.t).filter(t => !RP_UNIT_OF[t]).join(' ').trim();
       if (left) L.newName = left.replace(/\b\w/g, ch => ch.toUpperCase()); }
     if (L.item && L.item.type === 'fab' && !L.unitWord) L.unitWord = 'm';
     // her own fixes on this line win
