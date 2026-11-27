@@ -748,3 +748,10 @@ body.dash .toast{border-radius:12px;background:var(--forest)}
   .msw svg{width:16px;height:16px;fill:none;stroke:#D3B57F;stroke-width:2;stroke-linejoin:round}
   .mbar .live{margin-left:8px}
 }
+
+/* ---------- calm: nothing loops or blinks on the owner side (the "work stopped" alarm still flashes) ---------- */
+.side .tabs .badge,.qa em,.live i,.live-dot,.k-late.on .kpi-ic::after,.k-urgent.on .kpi-ic::after,.k-working.on::before,
+.need.red .need-dot,body.dash .seg.now i,.switch button.ring::after{animation:none!important}
+.live i,.live-dot{box-shadow:0 0 0 3px rgba(92,208,138,.25)}
+.need.red .need-dot{box-shadow:0 0 0 3px color-mix(in srgb,var(--c-late) 22%,transparent)}
+.k-late.on .kpi-ic::after,.k-urgent.on .kpi-ic::after{box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 22%,transparent)}

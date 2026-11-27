@@ -7,6 +7,7 @@
  function entrance(){
    if(popup)close();
    if(reduce.matches)return;
+   if(!view.classList.contains('enter'))return;   // only when a page is opened, never on taps or the 8-second refresh
    const selectors=':scope > *, .kt-charts > .kt-chart-panel';
    const nodes=Array.from(view.querySelectorAll(selectors)).filter(el=>el.offsetParent!==null);
    nodes.slice(0,20).forEach((el,i)=>{
