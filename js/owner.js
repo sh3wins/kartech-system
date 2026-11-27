@@ -131,7 +131,10 @@
       loadDay();
       announceChanges();
       $('#live').classList.remove('off'); $('#live').lastChild.textContent = ' Live';
-      if (!document.querySelector('.scrim')) render();
+      if (!document.querySelector('.scrim')){
+        // on the rough paper, never redraw the paper itself (she may be typing); only the "what I understood" side, and not while she's using it
+        if (tab === 'stock' && stockMode === 'paper' && document.getElementById('rpText')){ const ae = document.activeElement; if (!(ae && ae.closest && ae.closest('#rpOut'))) rpRedraw(); }
+        else render(); }
       alarmRender();
     } catch(e){
       $('#live').classList.add('off'); $('#live').lastChild.textContent = ' Offline';
@@ -1885,7 +1888,171 @@
     setTimeout(() => s.querySelector('#tName').focus(), 50);
   }
 
-  const stockToggle = () => `<div class="kd-seg sp-mode" role="group" aria-label="Show"><button class="${stockMode === 'shop' ? 'on' : ''}" data-smode="shop">Shop products</button><button class="${stockMode === 'fabrics' ? 'on' : ''}" data-smode="fabrics">Fabrics</button><button class="${stockMode === 'tools' ? 'on' : ''}" data-smode="tools">Tools &amp; materials</button></div>`;
+  const stockToggle = () => `<div class="kd-seg sp-mode" role="group" aria-label="Show"><button class="${stockMode === 'paper' ? 'on' : ''}" data-smode="paper">📝 Rough paper</button><button class="${stockMode === 'shop' ? 'on' : ''}" data-smode="shop">Shop products</button><button class="${stockMode === 'fabrics' ? 'on' : ''}" data-smode="fabrics">Fabrics</button><button class="${stockMode === 'tools' ? 'on' : ''}" data-smode="tools">Tools &amp; materials</button></div>`;
+  /* ---------- ROUGH PAPER: write it the way you'd say it, the app files it ----------
+     "7 pckts rubbers given to Junior", "11 packets of rubbers came in", "Juma returned 2 grinding disks",
+     "4.5 m red leatherette to Jorim for KT-1086". Uses the normal stock moves, so nothing new in the database. */
+  const RP = { text: (() => { try { return localStorage.getItem('kt-rough') || ''; } catch (e) { return ''; } })(), fix: {}, busy: false, err: {}, rename: {}, unitOf: {} };   // rename: a corrected spelling applies to every line with that new name
+  const RP_UNITS = { packets:['pkt','pkts','pckt','pckts','packet','packets','pack','packs','pkg','pkgs','pakiti'], pcs:['pc','pcs','piece','pieces','pce','pcz'], m:['m','mtr','mtrs','metre','metres','meter','meters','mita'],
+    litres:['l','lt','ltr','ltrs','litre','litres','liter','liters','lita'], kg:['kg','kgs','kilo','kilos'], boxes:['box','boxes','bx','bxs'], rolls:['roll','rolls'], tins:['tin','tins'], bags:['bag','bags'],
+    sheets:['sheet','sheets'], lengths:['length','lengths'], bundles:['bundle','bundles'], cans:['can','cans'], bottles:['bottle','bottles'], pairs:['pair','pairs'], dozens:['dozen','dozens'] };
+  const RP_UNIT_OF = {}; Object.entries(RP_UNITS).forEach(([u, ws]) => ws.forEach(w => RP_UNIT_OF[w] = u));
+  const RP_NUMS = { one:1, two:2, three:3, four:4, five:5, six:6, seven:7, eight:8, nine:9, ten:10, eleven:11, twelve:12, thirteen:13, fourteen:14, fifteen:15, twenty:20, thirty:30, fifty:50, hundred:100, half:0.5, dozen:12 };
+  const RP_STOP = new Set('of the a an for and to from by in into out back came come arrived received bought delivered delivery given gave give took take taken picked collected issued returned return brought used new stock got added supplied more some by at on with x'.split(' '));
+  const rpStem = t => t.length > 4 && t.endsWith('es') && !t.endsWith('ses') ? t.slice(0, -2) : t.length > 3 && t.endsWith('s') ? t.slice(0, -1) : t;
+  function rpLev(a, b){ if (Math.abs(a.length - b.length) > 2) return 9; const d = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++){ let p = d[0]; d[0] = i; for (let j = 1; j <= b.length; j++){ const t = d[j]; d[j] = Math.min(d[j] + 1, d[j - 1] + 1, p + (a[i - 1] === b[j - 1] ? 0 : 1)); p = t; } } return d[b.length]; }
+  const rpLike = (t, c) => { t = rpStem(t); c = rpStem(c); if (t === c) return true; if (t.length >= 4 && c.startsWith(t)) return true;
+    const lim = c.length >= 7 ? 2 : c.length >= 4 ? 1 : 0; return lim > 0 && rpLev(t, c) <= lim; };
+  const rpToks = x => String(x).toLowerCase().replace(/(\d)([a-z])/g, '$1 $2').replace(/[^a-z0-9.\-&]+/g, ' ').split(' ').filter(Boolean);
+  function rpItems(){
+    return S.mats.filter(m => m.active).map(m => ({ type:'mat', id:m.id, name:m.name, unit:m.unit, toks:rpToks(m.name).filter(t => !RP_STOP.has(t)) }))
+      .concat((S.fabs || []).map(f => ({ type:'fab', id:f.id, name:fabName(f), unit:'m', hex:f.hex, toks:rpToks(f.kind + ' ' + f.colour).filter(t => !RP_STOP.has(t) && t !== '·') })));
+  }
+  function rpParse(raw){
+    const low = raw.toLowerCase(), toks = rpToks(raw), L = { raw, kind:null, qty:null, unitWord:null, item:null, cands:[], worker:null, order:null, newName:null };
+    // how many
+    const nm = low.replace(/(\d),(\d)/g, '$1$2').match(/\d+(?:\.\d+)?/); if (nm) L.qty = parseFloat(nm[0]);
+    else { const w = toks.find(t => RP_NUMS[t] != null); if (w) L.qty = RP_NUMS[w]; }
+    // order number
+    const om = low.match(/\bkt[\s-]?(\d{3,6})\b/); if (om){ const o = S.orders.find(x => x.ref.toLowerCase() === 'kt-' + om[1]); if (o) L.order = o.id; }
+    // which way
+    if (/\b(returned|returns?|brought back|gave back|given back|back from|came back)\b/.test(low)) L.kind = 'back';
+    else if (/\b(came in|come in|comes in|arrived|arrive|received|receive|bought|buy|delivered|delivery|restock\w*|supplied|supply|new stock|got in|added|in stock|stocked)\b/.test(low)) L.kind = 'in';
+    else if (/\b(given|gave|give|took|take|taken|takes|picked|pick|collected|collect|issued|issue|used|use)\b/.test(low)) L.kind = 'out';
+    // who
+    const used = new Set();
+    for (const w of S.workers.filter(x => x.active)){
+      const wt = rpToks(w.name);
+      const hit = toks.findIndex(t => t.length >= 3 && wt.some(n => n === t || (n.length >= 5 && rpLev(n, t) <= 1)));
+      if (hit >= 0){ L.worker = w.id; used.add(hit); break; }
+    }
+    if (!L.kind && (L.worker || /\bto\b/.test(low))) L.kind = 'out';
+    // unit word and the item
+    toks.forEach((t, i) => { if (RP_UNIT_OF[t] && !L.unitWord) { L.unitWord = RP_UNIT_OF[t]; used.add(i); } });
+    const words = toks.map((t, i) => ({ t, i })).filter(x => !used.has(x.i) && !RP_STOP.has(x.t) && !/^\d/.test(x.t) && RP_NUMS[x.t] == null && !/^kt-?\d+$/.test(x.t) && x.t !== 'kt');
+    const scored = rpItems().map(c => { const hit = c.toks.filter(ct => words.some(w => rpLike(w.t, ct))).length; return { c, score: c.toks.length ? hit / c.toks.length + hit * 0.01 : 0 }; })
+      .filter(x => x.score >= 0.5).sort((a, b) => b.score - a.score);
+    if (scored.length){ const top = scored[0].score; L.cands = scored.filter(x => top - x.score < 0.005).map(x => x.c); if (L.cands.length === 1) L.item = L.cands[0]; }
+    if (!scored.length && words.length){ const left = words.map(x => x.t).filter(t => !RP_UNIT_OF[t]).join(' ').trim();
+      if (left) L.newName = left.replace(/\b\w/g, ch => ch.toUpperCase()); }
+    if (L.item && L.item.type === 'fab' && !L.unitWord) L.unitWord = 'm';
+    // her own fixes on this line win
+    const fx = RP.fix[raw]; if (fx){ ['kind', 'qty', 'worker', 'order'].forEach(k => { if (fx[k] !== undefined) L[k] = fx[k]; });
+      if (fx.item){ const c = rpItems().find(x => x.type + ':' + x.id === fx.item); if (c) L.item = c; }
+    }
+    if (L.newName){ L.newKey = L.newName.toLowerCase(); if (RP.rename[L.newKey] != null) L.newName = RP.rename[L.newKey].trim() || null; if (RP.unitOf[L.newKey]) L.unitWord = RP.unitOf[L.newKey]; }
+    L.isNew = !L.item && !!L.newName && L.cands.length < 2;   // not on the list: it gets added when she files
+    return L;
+  }
+  function rpProblem(L){
+    if (!L.item && !L.isNew) return L.cands.length > 1 ? 'Which one did you mean?' : "I couldn't tell which item";
+    if (!(L.qty > 0)) return 'How many?';
+    if (!L.kind) return 'Did it come in, go out or come back?';
+    if (L.kind !== 'in' && !L.worker && !(L.item && L.item.type === 'fab' && L.kind === 'out')) return L.kind === 'out' ? 'Who took it?' : 'Who brought it back?';
+    return null;
+  }
+  const rpLines = () => RP.text.split(/\n|;/).map(x => x.trim()).filter(x => x && !/^✓/.test(x));
+  // what the store will hold after each line, counting in the order they're filed (came in → returned → given out)
+  function rpProject(L){
+    const start = {}, out = {}, ord = { in:0, back:1, out:2 };
+    L.map((x, i) => ({ x, i })).filter(o => !rpProblem(o.x)).sort((a, b) => ord[a.x.kind] - ord[b.x.kind] || a.i - b.i).forEach(({ x }) => {
+      const k = x.item ? x.item.type + ':' + x.item.id : 'new:' + x.newName.toLowerCase();
+      if (start[k] == null){ const st = !x.item ? null : x.item.type === 'mat' ? M(x.item.id) : (S.fabs || []).find(f => f.id === x.item.id); start[k] = st ? (x.item.type === 'mat' ? st.store : +st.metres) : 0; }
+      const before = start[k]; start[k] = before + (x.kind === 'out' ? -x.qty : x.qty); out[x.raw] = [before, start[k]]; });
+    return out;
+  }
+  let rpProj = {};
+  function rpCard(L, i){
+    const pb = rpProblem(L), it = L.item, W_ = L.worker && W(L.worker), O_ = L.order && O(L.order), u = it ? it.unit : (L.unitWord || 'pcs');
+    const verb = { in:'came in', out: W_ ? 'given to' : 'used', back:'returned by' }[L.kind] || '…';
+    const unitWarn = it && it.type === 'mat' && L.unitWord && L.unitWord !== it.unit && !(L.unitWord === 'pcs' && it.unit === 'pcs') ? `<small class="rp-warn">You wrote ${esc(L.unitWord)}; ${esc(it.name)} is counted in ${esc(it.unit)}.</small>` : '';
+    const st = it && it.type === 'mat' ? M(it.id) : null, fb = it && it.type === 'fab' ? (S.fabs || []).find(f => f.id === it.id) : null;
+    const pr = rpProj[L.raw], left = pr ? pr[0] : null, after = pr ? pr[1] : null, iname = it ? it.name : L.newName, iunit = it ? it.unit : u;
+    const items = rpItems();
+    return `<div class="rp-card ${pb ? 'rp-need' : 'rp-ok'}" data-rpi="${i}">
+      <div class="rp-say">${pb ? '⚠️' : '✅'} <b>${L.qty > 0 ? n2(L.qty) : '?'} ${esc(u)}</b> ${it ? (it.type === 'fab' ? `<i class="fab-sw" style="background:${esc(it.hex || '#888')}"></i>` : '') + esc(it.name) : `${L.isNew ? `<span class="rp-newtag">New</span> <b>${esc(L.newName)}</b>` : `<span class="rp-q">?</span>`}`} <span class="rp-v">${verb}</span> ${W_ ? `<b>${esc(W_.name)}</b>` : ''}${O_ ? ` <span class="rp-v">for</span> <b>${esc(O_.ref)}</b>` : ''}</div>
+      <div class="rp-raw">“${esc(L.raw)}”</div>
+      ${pb ? `<div class="rp-pb">${esc(pb)}</div>` : ''}${unitWarn}
+      ${RP.err[L.raw] ? `<div class="rp-pb">${esc(RP.err[L.raw])}</div>` : ''}
+      <div class="rp-fix">
+        <select data-rpk="kind" aria-label="Came in, went out or came back"><option value="">Which way?</option><option value="in" ${L.kind === 'in' ? 'selected' : ''}>Came in</option><option value="out" ${L.kind === 'out' ? 'selected' : ''}>Given out / used</option><option value="back" ${L.kind === 'back' ? 'selected' : ''}>Returned</option></select>
+        <input data-rpk="qty" type="number" min="0" step="any" inputmode="decimal" value="${L.qty > 0 ? L.qty : ''}" placeholder="How many" aria-label="How many">
+        <select data-rpk="item" aria-label="Item"><option value="">Pick the item</option>
+          <optgroup label="Tools & materials">${items.filter(x => x.type === 'mat').map(x => `<option value="mat:${x.id}" ${it && it.type === 'mat' && it.id === x.id ? 'selected' : ''}>${esc(x.name)} (${esc(x.unit)})</option>`).join('')}</optgroup>
+          ${items.some(x => x.type === 'fab') ? `<optgroup label="Fabrics">${items.filter(x => x.type === 'fab').map(x => `<option value="fab:${x.id}" ${it && it.type === 'fab' && it.id === x.id ? 'selected' : ''}>${esc(x.name)} (m)</option>`).join('')}</optgroup>` : ''}</select>
+        ${L.kind !== 'in' ? `<select data-rpk="worker" aria-label="Who"><option value="">${L.kind === 'back' ? 'Who returned it?' : 'Who took it?'}</option>${S.workers.filter(w => w.active).map(w => `<option value="${w.id}" ${L.worker === w.id ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}</select>` : ''}
+        ${L.kind === 'out' && it && it.type === 'mat' ? `<select data-rpk="order" aria-label="For which order"><option value="">No order</option>${S.orders.filter(o => !o.delivered).map(o => `<option value="${o.id}" ${L.order === o.id ? 'selected' : ''}>${esc(o.ref)} · ${esc(o.customer)}</option>`).join('')}</select>` : ''}
+      </div>
+      ${L.isNew ? `<div class="rp-new"><span>Not in your stock yet: it will be added when you file. Fix the spelling here if needed:</span><input class="rp-nn" data-nk="${esc(L.newKey)}" value="${esc(L.newName)}" maxlength="80" aria-label="Name of the new item">
+        <select class="rp-nu" data-nk="${esc(L.newKey)}" aria-label="Counted in">${[...new Set([L.unitWord || 'pcs', 'pcs', 'packets', 'm', 'litres', 'kg', 'boxes', 'rolls', 'tins', 'bags', 'sheets', 'lengths'])].map(u => `<option ${u === (L.unitWord || 'pcs') ? 'selected' : ''}>${u}</option>`).join('')}</select></div>` : ''}
+      ${after != null && !pb ? `<small class="rp-after">${esc(iname)}: ${n2(left)} → <b>${n2(after)} ${esc(iunit)}</b> in the store${after < 0 ? ' <span class="rp-neg">(not enough recorded: add what came in first)</span>' : ''}</small>` : ''}
+    </div>`;
+  }
+  function viewPaper(){
+    const L = rpLines().map(rpParse), ready = L.filter(x => !rpProblem(x)).length;
+    return `${stockToggle()}
+      <div class="d-head anim" style="--i:0"><div><h1>Rough paper</h1><p class="sub" style="margin:0">Write it the way you'd say it, one thing per line. I'll work out what it is and put it in the right place.</p></div></div>
+      <div class="rp anim" style="--i:1">
+        <div class="rp-paper"><textarea id="rpText" spellcheck="false" placeholder="7 pckts rubbers given to Juma&#10;11 packets of rubbers came in&#10;Otieno took 5 welding rods for KT-1086&#10;4.5 m red leatherette to Achieng&#10;Juma returned 2 grinding disks">${esc(RP.text)}</textarea>
+          <small class="rp-hint">Saved on this device as you type. Lines go away once they're filed.</small></div>
+        <div class="rp-out" id="rpOut">${rpOutHtml(L, ready)}</div>
+      </div>`;
+  }
+  function rpOutHtml(L, ready){
+    if (!L.length) return `<div class="rp-empty"><b>What I understood</b><p>Start writing on the left. Each line shows up here so you can check it before it's filed.</p></div>`;
+    rpProj = rpProject(L);
+    return `<div class="rp-top"><b>What I understood</b><span>${ready} of ${L.length} ready</span></div>
+      ${L.map(rpCard).join('')}
+      <button class="btn rp-go ${ready ? '' : 'line'}" id="rpGo" ${ready && !RP.busy ? '' : 'disabled'}>${RP.busy ? 'Filing…' : ready ? `✓ File ${ready === L.length ? (ready === 1 ? 'it' : 'all ' + ready) : ready + ' ready line' + (ready === 1 ? '' : 's')}` : 'Fix the lines marked ⚠️'}</button>`;
+  }
+  const rpRedraw = () => { const o = document.getElementById('rpOut'); if (!o) return; const L = rpLines().map(rpParse); o.innerHTML = rpOutHtml(L, L.filter(x => !rpProblem(x)).length); };
+  let rpT = null;
+  document.addEventListener('input', e => {
+    if (e.target.id === 'rpText'){ RP.text = e.target.value; try { localStorage.setItem('kt-rough', RP.text); } catch (er) {} clearTimeout(rpT); rpT = setTimeout(rpRedraw, 250); return; }
+    if (e.target.classList && e.target.classList.contains('rp-nn')){ RP.rename[e.target.dataset.nk] = e.target.value; return; }
+    const k = e.target.dataset && e.target.dataset.rpk; if (!k || e.target.tagName !== 'INPUT') return;
+    const raw = rpLines()[+e.target.closest('[data-rpi]').dataset.rpi]; RP.fix[raw] = Object.assign(RP.fix[raw] || {}, { qty: parseFloat(e.target.value) || null });
+  });
+  document.addEventListener('change', e => {
+    if (e.target.classList && (e.target.classList.contains('rp-nu') || e.target.classList.contains('rp-nn'))){ const nk = e.target.dataset.nk;
+      if (e.target.classList.contains('rp-nu')) RP.unitOf[nk] = e.target.value; else RP.rename[nk] = e.target.value; return rpRedraw(); }
+    const k = e.target.dataset && e.target.dataset.rpk; if (!k) return;
+    const raw = rpLines()[+e.target.closest('[data-rpi]').dataset.rpi], v = e.target.value || null;
+    RP.fix[raw] = Object.assign(RP.fix[raw] || {}, { [k]: k === 'qty' ? (parseFloat(v) || null) : v }); delete RP.err[raw]; rpRedraw();
+  });
+  document.addEventListener('click', async e => {
+    if (!e.target.closest('#rpGo') || RP.busy) return;
+    const all = rpLines().map(rpParse), go = all.filter(x => !rpProblem(x)).sort((a, b) => ({ in:0, back:1, out:2 })[a.kind] - ({ in:0, back:1, out:2 })[b.kind]); if (!go.length) return;   // what came in is filed first, so it can be given out
+    RP.busy = true; rpRedraw(); const done = [], added = [];
+    for (let L of go){
+      let r;
+      if (!L.item){   // not on the list yet: add it (once), then file the line against it
+        const again = rpParse(L.raw);   // an earlier line may have just added it under a corrected spelling
+        if (again.item && again.item.type === 'mat') L = Object.assign({}, L, { item: again.item });
+      }
+      if (!L.item){
+        const same = S.mats.find(m => m.name.toLowerCase() === L.newName.toLowerCase());
+        if (!same){ const c = await db.rpc('ws_save_material', { p: { name: L.newName, unit: L.unitWord || 'pcs', low_at: 0 } });
+          if (c.error){ RP.err[L.raw] = errMsg(c.error); continue; } await load(); added.push(L.newName); }
+        const m = S.mats.find(x => x.name.toLowerCase() === L.newName.toLowerCase());
+        if (!m){ RP.err[L.raw] = 'Could not add ' + L.newName; continue; }
+        L = Object.assign({}, L, { item: { type:'mat', id:m.id, name:m.name, unit:m.unit } });
+      }
+      if (L.item.type === 'mat') r = await db.rpc('ws_stock_move', { p: { kind: L.kind, material_id: L.item.id, qty: L.qty, worker_id: L.kind === 'in' ? null : L.worker, order_id: L.kind === 'out' ? L.order : null, note: 'Rough paper: ' + L.raw.slice(0, 180) } });
+      else if (L.kind === 'out' && L.worker) r = await db.rpc('ws_add_worker_note', { p_worker: L.worker, p_body: L.order ? (O(L.order) || {}).ref || '' : '', p_fabric: L.item.id, p_metres: L.qty });
+      else { r = await db.rpc('kt_fabric_metres', { p_id: L.item.id, p_change: L.kind === 'out' ? -L.qty : L.qty });
+        if (!r.error && L.kind === 'back' && L.worker) await db.rpc('ws_add_worker_note', { p_worker: L.worker, p_body: `Returned ${n2(L.qty)} m ${L.item.name}` }); }
+      if (r.error) RP.err[L.raw] = errMsg(r.error); else { done.push(L.raw); delete RP.fix[L.raw]; delete RP.err[L.raw]; }
+    }
+    // filed lines leave the paper; anything that failed stays with its reason
+    const gone = new Set(done);
+    RP.text = RP.text.split('\n').filter(x => !gone.has(x.trim())).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    try { localStorage.setItem('kt-rough', RP.text); } catch (er) {}
+    RP.busy = false; if (done.length) toast(`Filed ${done.length} line${done.length === 1 ? '' : 's'}${added.length ? ` · added ${added.join(', ')} to your stock` : ''}`); await load();
+    const ta = document.getElementById('rpText'); if (ta && ta.value !== RP.text) ta.value = RP.text; rpRedraw();
+  });
+
   /* ---------- SHOP PRODUCTS: what customers see on the website ---------- */
   const SHOP_SITE = 'https://sh3wins.github.io/kartech-website/';
   const SHOP_TAGS = ['Furniture', 'Waiting seats', 'Catering equipment', 'Outdoor'];
@@ -2096,6 +2263,7 @@
   function viewStock(){
     if (stockMode === 'shop') return viewShop();
     if (stockMode === 'fabrics') return viewFabrics();
+    if (stockMode === 'paper') return viewPaper();
     const mats = S.mats.filter(m => m.active);
     const watch = watchList();
     const moveTxt = x => { const m = M(x.mat), w = x.worker && W(x.worker), o = x.order && O(x.order); if (!m) return '';
