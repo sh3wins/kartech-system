@@ -142,3 +142,29 @@
 .o-line-f{ display:inline-flex; align-items:center; font-size:13.5px }
 .o-line-f.muted{ color:var(--muted) }
 @media (max-width:560px){ .o-line{ grid-template-columns:auto 1fr } .o-line-f{ grid-column:2 } }
+
+/* ---------- notes on a worker ---------- */
+.wn{ border:1px solid var(--line); border-radius:14px; padding:14px; margin:6px 0 4px; background:rgba(255,255,255,.6); display:flex; flex-direction:column; gap:10px }
+.wn .hidden{ display:none }
+.wn-h{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap }
+.wn-h b{ font-size:15px }
+.wn-h small{ color:var(--muted); font-size:12.5px }
+.wn-mode{ display:inline-flex; align-self:flex-start; border:1px solid var(--line); border-radius:999px; padding:3px; background:#fff }
+.wn-mode button{ border:0; background:none; font:inherit; font-size:13.5px; padding:6px 14px; border-radius:999px; cursor:pointer; color:var(--ink) }
+.wn-mode button.on{ background:var(--deep, #185844); color:#fff; font-weight:600 }
+.wn-fab{ display:flex; flex-direction:column; gap:8px }
+.wn-fab .fab-pick{ max-height:130px }
+.wn-m{ margin:0; max-width:220px }
+.wn textarea{ width:100%; border:1px solid var(--line); border-radius:10px; padding:10px 12px; font:inherit; font-size:14.5px; resize:vertical; background:#fff }
+.wn-act{ display:flex; justify-content:space-between; align-items:center; gap:10px }
+.wn-act .ferr{ margin:0 }
+.wn-list{ display:flex; flex-direction:column; max-height:240px; overflow-y:auto; border-top:1px solid var(--line) }
+.wn-n{ display:grid; grid-template-columns:92px 1fr auto; gap:10px; align-items:start; padding:9px 2px; border-bottom:1px solid var(--line) }
+.wn-n:last-child{ border-bottom:0 }
+.wn-d{ color:var(--muted); font-size:12.5px; padding-top:2px; font-variant-numeric:tabular-nums }
+.wn-n p{ margin:0; font-size:14.5px; overflow-wrap:anywhere }
+.wn-n.wn-taken p{ font-weight:600 }
+.wn-x{ border:0; background:none; cursor:pointer; font:inherit; font-size:13px; color:var(--muted); padding:2px 4px; white-space:nowrap }
+.wn-x.sure{ color:var(--red, #C0392B); font-weight:700 }
+@media (max-width:520px){ .wn-n{ grid-template-columns:1fr auto } .wn-d{ grid-column:1 / -1; padding:0 } }
+.wn .fab-c[data-fid=""]{ display:none }

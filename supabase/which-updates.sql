@@ -38,6 +38,7 @@ from (values
   (29, 'update-29-fabrics.sql', 'UPDATE 29: fabrics and colours (stock, orders, shop)', to_regclass('public.kt_fabrics') is not null),
   (30, 'update-30-fabric-photos.sql', 'UPDATE 30: a photo on each fabric', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'kt_fabrics' and column_name = 'photo')),
   (31, 'update-31-order-lines.sql', 'UPDATE 31: several items in one order', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'ws_orders' and column_name = 'lines')),
-  (32, 'update-32-client-sees-order.sql', 'UPDATE 32: the client sees what she ordered', to_regprocedure('public.ws_room_order(text)') is not null)
+  (32, 'update-32-client-sees-order.sql', 'UPDATE 32: the client sees what she ordered', to_regprocedure('public.ws_room_order(text)') is not null),
+  (33, 'update-33-worker-notes.sql', 'UPDATE 33: notes on each worker, fabric taken', to_regclass('public.ws_worker_notes') is not null)
 ) v(nr, file, about, ok)
 order by nr;

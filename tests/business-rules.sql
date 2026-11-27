@@ -347,6 +347,32 @@ begin
       execute 'reset role';
     end if;
 
+    -- ---------- notes on a worker (update 33) ----------
+    if to_regclass('public.ws_worker_notes') is not null and exists (select 1 from public.ws_workers) then
+      perform set_config('request.jwt.claim.sub', owner_id::text, true);
+      perform set_config('request.jwt.claims', json_build_object('sub', owner_id, 'role', 'authenticated')::text, true);
+      execute 'set local role authenticated';
+      declare wid uuid := (select id from public.ws_workers limit 1); fb uuid; nid bigint; m0 numeric; begin
+        fb := public.kt_save_fabric(jsonb_build_object('kind', 'TEST notes fabric', 'colour', 'Green', 'metres', 20));
+        nid := public.ws_add_worker_note(wid, 'test', fb, 4.5);
+        select metres into m0 from public.kt_fabrics where id = fb;
+        res := res || format('%s|"Fabric taken" takes the metres off the stock|%s m left', case when m0 = 15.5 then 'PASS' else 'FAIL' end, m0);
+        perform public.ws_delete_worker_note(nid);
+        select metres into m0 from public.kt_fabrics where id = fb;
+        res := res || format('%s|Deleting that note puts the metres back|%s m', case when m0 = 20 then 'PASS' else 'FAIL' end, m0);
+        execute 'reset role';
+        perform set_config('request.jwt.claim.sub', station_id::text, true);
+        perform set_config('request.jwt.claims', json_build_object('sub', station_id, 'role', 'authenticated')::text, true);
+        execute 'set local role authenticated';
+        select count(*) into n from public.ws_worker_notes;
+        begin
+          perform public.ws_add_worker_note(wid, 'hack');
+          res := res || 'FAIL|The workshop computer cannot read or write worker notes|it wrote one'::text;
+        exception when others then res := res || format('%s|The workshop computer cannot read or write worker notes|%s seen', case when n = 0 then 'PASS' else 'FAIL' end, n); end;
+        execute 'reset role';
+      end;
+    end if;
+
     -- ---------- as the OWNER again: the Bin ----------
     perform set_config('request.jwt.claim.sub', owner_id::text, true);
     perform set_config('request.jwt.claims', json_build_object('sub', owner_id, 'role', 'authenticated')::text, true);

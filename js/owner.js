@@ -2232,6 +2232,14 @@
         ${w && w.task ? '<small style="color:var(--muted)">Can change step once their current job is finished.</small>' : ''}</label>
       <div class="field"><span>Can also do (optional): when their own step has no work, they help here</span>${stepChecks(w ? w.covers : [], 'wCover')}</div>
       <p style="font-size:13px;color:var(--muted)">They go in on the workshop screen by tapping their name.</p>
+      ${w ? `<div class="wn" id="wn">
+        <div class="wn-h"><b>📝 Notes about ${esc(w.name)}</b><small>Only you see these</small></div>
+        <div class="wn-mode"><button type="button" class="on" data-wnm="note">📝 Note</button>${S.fabs ? '<button type="button" data-wnm="fab">🧵 Fabric taken</button>' : ''}</div>
+        <div class="wn-fab hidden">${S.fabs ? fabricPicker('wnFab', null) : ''}
+          <label class="field wn-m"><span>How many metres</span><input id="wnM" type="number" min="0.1" step="0.5" inputmode="decimal" placeholder="e.g. 5"></label></div>
+        <textarea id="wnBody" rows="2" maxlength="500" placeholder="e.g. Borrowed the big grinder. Off on Friday."></textarea>
+        <div class="wn-act"><span id="wnErr" class="ferr"></span><button type="button" class="btn sm" id="wnAdd">Add note</button></div>
+        <div class="wn-list" id="wnList"><p class="hint-sm">Loading…</p></div></div>` : ''}
       <p id="wErr" style="color:var(--red);min-height:20px;font-size:13px"></p>
       <div class="actions" style="justify-content:space-between">
         ${w ? `<span style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ${!w.active ? '' : 'red'}" id="wToggle">${!w.active ? 'Switch back on' : 'Switch off'}</button><button class="btn red line" id="wDel">🗑 Delete</button></span>` : '<span></span>'}
@@ -2258,6 +2266,44 @@
       closeModal(); toast(`${w.name} moved to the 🗑 Bin`); await load();
     };
     if (!w) setTimeout(() => s.querySelector('#wName').focus(), 50);
+    if (w) workerNotes(s, w);
+  }
+
+  /* ---------- notes on a worker (update-33): free text, or "fabric taken" which takes metres off the fabric stock ---------- */
+  async function workerNotes(s, w){
+    const box = s.querySelector('#wn'); if (!box) return;
+    let mode = 'note'; const getFab = bindFabricPicker(box, 'wnFab');
+    const when = d => { const t = new Date(d), today = new Date(); const same = t.toDateString() === today.toDateString();
+      return same ? 'Today ' + t.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' }) : t.toLocaleDateString('en-GB', { day:'numeric', month:'short', year: t.getFullYear() === today.getFullYear() ? undefined : 'numeric' }); };
+    const draw = async () => {
+      const r = await db.from('ws_worker_notes').select('*').eq('worker_id', w.id).order('created_at', { ascending:false }).limit(60);
+      const l = box.querySelector('#wnList'); if (!l) return;
+      if (r.error){ l.innerHTML = '<p class="hint-sm">Run <b>update-33-worker-notes.sql</b> in Supabase to keep notes on workers.</p>'; box.querySelector('#wnAdd').disabled = true; return; }
+      l.innerHTML = r.data.length ? r.data.map(n => `<div class="wn-n ${n.fabric_id ? 'wn-taken' : ''}"><span class="wn-d">${esc(when(n.created_at))}</span><p>${n.fabric_id ? '🧵 ' : ''}${esc(n.body)}</p><button type="button" class="wn-x" data-wnx="${n.id}" title="${n.fabric_id ? 'Delete (puts the metres back)' : 'Delete'}" aria-label="Delete note">🗑</button></div>`).join('')
+        : '<p class="hint-sm">No notes yet.</p>';
+    };
+    box.querySelector('.wn-mode').addEventListener('click', e => { const b = e.target.closest('[data-wnm]'); if (!b) return; mode = b.dataset.wnm;
+      box.querySelectorAll('[data-wnm]').forEach(x => x.classList.toggle('on', x === b));
+      box.querySelector('.wn-fab').classList.toggle('hidden', mode !== 'fab');
+      box.querySelector('#wnBody').placeholder = mode === 'fab' ? 'What for? (optional) e.g. KT-1086 bar stools' : 'e.g. Borrowed the big grinder. Off on Friday.'; });
+    box.querySelector('#wnAdd').onclick = async () => {
+      const err = box.querySelector('#wnErr'), b = box.querySelector('#wnAdd'); err.textContent = '';
+      const body = box.querySelector('#wnBody').value.trim(), fid = mode === 'fab' ? getFab() : null, m = parseFloat(box.querySelector('#wnM') && box.querySelector('#wnM').value);
+      if (mode === 'fab' && !fid) return err.textContent = 'Pick the fabric.';
+      if (mode === 'fab' && !(m > 0)) return err.textContent = 'How many metres?';
+      if (mode === 'note' && !body) return err.textContent = 'Write something first.';
+      b.disabled = true;
+      const { error } = await db.rpc('ws_add_worker_note', { p_worker: w.id, p_body: body, p_fabric: fid, p_metres: mode === 'fab' ? m : null });
+      b.disabled = false; if (error) return err.textContent = errMsg(error);
+      box.querySelector('#wnBody').value = ''; if (box.querySelector('#wnM')) box.querySelector('#wnM').value = '';
+      if (fid){ const f = S.fabs.find(x => x.id === fid); toast(`${m} m taken off ${f ? fabName(f) : 'the fabric'}`); load(); }
+      draw(); };
+    box.querySelector('#wnList').addEventListener('click', async e => { const x = e.target.closest('[data-wnx]'); if (!x) return;
+      if (!x.classList.contains('sure')){ x.classList.add('sure'); x.textContent = 'Delete?'; setTimeout(() => { if (document.body.contains(x)){ x.classList.remove('sure'); x.textContent = '🗑'; } }, 4000); return; }
+      const fabNote = x.closest('.wn-n').classList.contains('wn-taken');
+      const { error } = await db.rpc('ws_delete_worker_note', { p_note: +x.dataset.wnx }); if (error) return toast(errMsg(error));
+      if (fabNote){ toast('Note deleted, metres put back'); load(); } draw(); });
+    draw();
   }
 
   /* =====================================================================
