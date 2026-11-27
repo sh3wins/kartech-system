@@ -1511,12 +1511,12 @@
         <div><small>Balance</small><b class="${bal > 0 ? 'w' : 'g'}">${bal > 0 ? KSH(bal) : '✓ Fully paid'}</b></div>
       </div>
       <div class="mo-acts">
-        ${bal > 0 ? `<button class="btn sm mo-rcbtn" data-mpay="${o.id}">🧾 Got paid? Make receipt</button>` : ''}
+        ${bal > 0 ? `<button class="btn sm mo-rcbtn" data-mpay="${o.id}">💰 Record a payment <small>deposit or balance</small></button>` : ''}
         <button class="btn sm ${bal > 0 ? 'line' : ''}" data-msendinv="${inv.id}">📤 ${inv.sent_at ? 'Send invoice again' : 'Send invoice PDF'}</button>
         <button class="btn sm line" data-mviewinv="${inv.id}">👁 See invoice</button>
         <button class="btn sm line" data-minv="${o.id}">✏️ Edit invoice</button>
       </div>
-      ${!pays.length ? `<p class="mo-rt none">🧾 No receipts yet. When the client pays, tap <b>Got paid? Make receipt</b>: type the amount and the M-Pesa code, and the receipt is made and ready to send.</p>` : ''}
+      ${!pays.length ? `<p class="mo-rt none">⚠️ <b>No payment recorded yet.</b> When the deposit comes in, tap <b>💰 Record a payment</b> and type the amount and the M-Pesa code. The invoice will then say "Deposit received. Work has started."</p>` : ''}
       ${pays.length ? `<p class="mo-rt">🧾 Receipts · ${pays.length}</p><div class="mo-rcpts">${pays.map((p, i) => `<div class="mo-r"><span><b>${esc(p.no)} · ${KSH(p.amount)}</b><em>${esc(p.method)}${p.reference ? ' · ' + esc(p.reference) : ''}</em><small>${dShort(p.created_at)}${p.sent_at ? ' · sent ✓' : ''}</small></span>
           <button class="btn sm line" data-mviewr="${p.id}">👁 See</button><button class="btn sm ${p.sent_at ? 'line' : ''}" data-msendr="${p.id}">📤 ${p.sent_at ? 'Again' : 'Send receipt'}</button>
           ${i === pays.length - 1 && new Date(p.created_at).toDateString() === new Date().toDateString() && !o.delivered ? `<button class="link-sm" data-mcancel="${p.id}">Cancel</button>` : ''}</div>`).join('')}</div>` : ''}
@@ -1536,7 +1536,11 @@
       <div class="row2" style="margin-top:12px"><label class="field"><span>Client's phone (for WhatsApp)</span><input id="moPh" inputmode="tel" value="${esc(inv ? inv.phone || '' : phoneOf(o))}" placeholder="0712 345 678"></label>
         <label class="field"><span>Pay by (due date)</span><input id="moDue" type="date" value="${esc(inv ? inv.due_date || '' : o.dl || '')}"></label></div>
       <div class="mo-total"><span>Total</span><b id="moTot">KSh 0</b></div>
-      ${paid ? `<p class="sub">Already paid: ${KSH(paid)}. The total can't go below that.</p>` : ''}
+      ${paid ? `<p class="sub">Already paid: ${KSH(paid)}. The total can't go below that.</p>` : `<div class="mo-dep">
+        <b>💰 Deposit already paid?</b> <small>Fill this in and the invoice will confirm it: "Deposit received. Work has started."</small>
+        <div class="mo-dep-row"><label class="field"><span>Amount (KSh)</span><input id="moDepA" type="number" min="0" step="1" inputmode="decimal" placeholder="e.g. 20000"></label>
+          <label class="field"><span>Paid by</span><select id="moDepM"><option>M-Pesa</option><option>Cash</option><option>Bank</option><option>Other</option></select></label>
+          <label class="field"><span>M-Pesa code</span><input id="moDepR" placeholder="e.g. SJK7XQ2M4P" autocapitalize="characters" style="text-transform:uppercase;letter-spacing:.06em"></label></div></div>`}
       <p id="moErr" style="color:var(--red);min-height:18px;font-size:13px"></p>
       <div class="actions"><button class="btn line" data-x>Cancel</button><button class="btn" id="moSave">${inv ? 'Save changes' : 'Make invoice'}</button></div>`);
     const box = s.querySelector('#moLines');
@@ -1550,9 +1554,18 @@
       const btn = s.querySelector('#moSave'), err = s.querySelector('#moErr'); err.textContent = '';
       const items = read().filter(x => x.desc || x.price);
       if (!items.length) return err.textContent = 'Add at least one line with a price.';
+      const depEl = s.querySelector('#moDepA'), dep = depEl ? Number(depEl.value) || 0 : 0;
+      const tot = read().reduce((a, x) => a + (Number(x.qty) || 0) * (Number(x.price) || 0), 0);
+      if (dep < 0) return err.textContent = 'The deposit cannot be below 0.';
+      if (dep > tot) return err.textContent = `The deposit (${KSH(dep)}) is more than the invoice total (${KSH(tot)}).`;
       btn.disabled = true;
       const { data, error } = await db.rpc('kt_save_invoice', { p_order: o.id, p: { items, phone: s.querySelector('#moPh').value, due_date: s.querySelector('#moDue').value } });
       if (error){ btn.disabled = false; err.textContent = errMsg(error); return; }
+      if (dep > 0 && data && data.id){   // record the deposit too, so the invoice confirms it
+        btn.textContent = 'Recording the deposit…';
+        const r = await db.rpc('kt_record_payment', { p_invoice: data.id, p_amount: dep, p_method: s.querySelector('#moDepM').value, p_reference: s.querySelector('#moDepR').value });
+        if (r.error){ await load(); toast('Invoice made, but the deposit was not recorded: ' + errMsg(r.error) + '. Use 💰 Record a payment.'); return readyModal('invoice', o, data); }
+      }
       await load();
       readyModal('invoice', o, data);
     };
@@ -1562,7 +1575,7 @@
   function payModal(o, refPrefill){
     const inv = invOf(o); if (!inv) return invoiceModal(o);
     const bal = Number(inv.total) - paidOf(inv), half = Math.round(Number(inv.total) / 2);
-    const s = openModal(`<h3>🧾 Make receipt · ${o.ref}</h3>
+    const s = openModal(`<h3>💰 Record a payment · ${o.ref}</h3>
       <p class="sub">${esc(o.customer)} · Invoice ${esc(inv.no)} · Balance <b>${KSH(bal)}</b></p>
       <label class="field"><span>Amount received (KSh)</span><input id="mpAmt" type="number" min="1" step="1" inputmode="decimal" max="${bal}"></label>
       <div class="mo-quick">${!paysOf(inv).length && half < bal ? `<button type="button" class="btn sm line" data-amt="${half}">Half · ${KSH(half)}</button>` : ''}<button type="button" class="btn sm line" data-amt="${bal}">All the balance · ${KSH(bal)}</button></div>
