@@ -1615,7 +1615,9 @@
 
   async function invoiceBlob(id){
     const inv = S.money.inv.find(i => i.id === id); if (!inv) throw new Error('Invoice not found');
-    return KPDF.invoice({ biz: S.money.biz, inv, paid: paidOf(inv) });
+    // where the work is, so a paid invoice says the right thing (started / ready / delivered)
+    const o = inv.order_id && S.orders.find(x => x.id === inv.order_id), pr = o && orderProgress(o);
+    return KPDF.invoice({ biz: S.money.biz, inv, paid: paidOf(inv), stage: !o ? 'started' : o.delivered ? 'delivered' : pr && pr.finished ? 'ready' : 'started' });
   }
   async function receiptBlob(id, withOrder){
     const p = S.money.pays.find(x => x.id === id); if (!p) throw new Error('Receipt not found');
