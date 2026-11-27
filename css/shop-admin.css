@@ -220,3 +220,7 @@
 .rm:hover .rm-del,.rm-del:focus-visible{ opacity:1 }
 .rm-del.sure{ opacity:1; color:#C0392B; font-weight:700 }
 .rm.mine .rm-del.sure{ color:#FFD4CC }
+.room-pic{ padding:0 12px; font-size:16px; cursor:pointer; flex:none; display:inline-flex; align-items:center }
+.room-pic.busy{ opacity:.5; pointer-events:none }
+.rm.has-pic{ max-width:72% }
+.rm-pic{ display:block; width:100%; max-width:240px; max-height:240px; object-fit:cover; border-radius:10px; margin-bottom:6px }

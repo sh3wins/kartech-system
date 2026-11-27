@@ -40,6 +40,7 @@ from (values
   (31, 'update-31-order-lines.sql', 'UPDATE 31: several items in one order', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'ws_orders' and column_name = 'lines')),
   (32, 'update-32-client-sees-order.sql', 'UPDATE 32: the client sees what she ordered', to_regprocedure('public.ws_room_order(text)') is not null),
   (33, 'update-33-worker-notes.sql', 'UPDATE 33: notes on each worker, fabric taken', to_regclass('public.ws_worker_notes') is not null),
-  (34, 'update-34-delete-room-messages.sql', 'UPDATE 34: the owner can delete Order Room messages', to_regprocedure('public.ws_room_msg_delete(bigint)') is not null)
+  (34, 'update-34-delete-room-messages.sql', 'UPDATE 34: the owner can delete Order Room messages', to_regprocedure('public.ws_room_msg_delete(bigint)') is not null),
+  (35, 'update-35-reply-with-picture.sql', 'UPDATE 35: reply to the customer with a picture', to_regprocedure('public.ws_room_reply_photo(uuid,text,text)') is not null)
 ) v(nr, file, about, ok)
 order by nr;

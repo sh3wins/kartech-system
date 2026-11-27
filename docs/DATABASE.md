@@ -55,8 +55,9 @@ The system shares one Supabase project with the Kartech **website**. File `00` c
 | 32 | `update-32-client-sees-order.sql` | the client sees what she ordered: items, fabric and design pictures (never prices) |
 | 33 | `update-33-worker-notes.sql` | notes on each worker; "fabric taken" takes metres off the fabric stock |
 | 34 | `update-34-delete-room-messages.sql` | the owner can delete Order Room messages |
+| 35 | `update-35-reply-with-picture.sql` | reply to the customer with a picture |
 
-The order matters: each update builds on the ones before it. Updates 1 to 34 have been tested on a brand-new database, in this order, with no errors. All 57 business-rule tests and all security checks pass afterwards.
+The order matters: each update builds on the ones before it. Updates 1 to 35 have been tested on a brand-new database, in this order, with no errors. All 57 business-rule tests and all security checks pass afterwards.
 
 ### Helper files (read-only, they change nothing)
 

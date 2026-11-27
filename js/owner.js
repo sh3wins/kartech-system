@@ -1134,12 +1134,15 @@
     const { data, error } = await db.from('ws_room_msgs').select('*').in('order_id', [orderId]).order('id');
     if (!document.body.contains(g)) return;
     if (error){ g.innerHTML = `<span class="ph-empty">${/ws_room_msgs/.test(errMsg(error)) ? 'Run update-16-order-room.sql in Supabase to turn on the Order Room.' : esc(errMsg(error))}</span>`; return; }
-    g.innerHTML = data.length ? data.slice(-30).map(m => `<div class="rm ${m.who === 'kartech' ? 'mine' : ''}">${esc(m.text)}<small>${m.who === 'kartech' ? 'You' : 'Customer'} · ${ago(new Date(m.at).getTime())}<button class="rm-del" data-rmdel="${m.id}" title="Delete this message (the customer won't see it either)" aria-label="Delete message">🗑</button></small></div>`).join('')
+    g._msgs = data;
+    const picUrl = p => db.storage ? db.storage.from(ROOM_BUCKET).getPublicUrl(p).data.publicUrl : '';
+    g.innerHTML = data.length ? data.slice(-30).map(m => `<div class="rm ${m.who === 'kartech' ? 'mine' : ''} ${m.photo ? 'has-pic' : ''}">${m.photo ? `<a href="${esc(picUrl(m.photo))}" target="_blank" rel="noopener"><img class="rm-pic" src="${esc(picUrl(m.photo))}" alt="Picture sent" loading="lazy"></a>` : ''}${m.text ? esc(m.text) : ''}<small>${m.who === 'kartech' ? 'You' : 'Customer'} · ${ago(new Date(m.at).getTime())}<button class="rm-del" data-rmdel="${m.id}" title="Delete this message (the customer won't see it either)" aria-label="Delete message">🗑</button></small></div>`).join('')
       : '<span class="ph-empty">No messages yet.</span>';
     if (!g.dataset.delBound){ g.dataset.delBound = 1;
       g.addEventListener('click', async e => { const x = e.target.closest('[data-rmdel]'); if (!x) return; e.stopPropagation();
         if (!x.classList.contains('sure')){ x.classList.add('sure'); x.textContent = 'Delete?'; setTimeout(() => { if (document.body.contains(x)){ x.classList.remove('sure'); x.textContent = '🗑'; } }, 4000); return; }
-        x.disabled = true; const { error } = await db.rpc('ws_room_msg_delete', { p_id: +x.dataset.rmdel });
+        x.disabled = true; const row = (g._msgs || []).find(m => m.id === +x.dataset.rmdel); const { error } = await db.rpc('ws_room_msg_delete', { p_id: +x.dataset.rmdel });
+        if (!error && row && row.photo && /^reply\//.test(row.photo) && db.storage) db.storage.from(ROOM_BUCKET).remove([row.photo]).catch(() => {});
         if (error) return toast(/ws_room_msg_delete/.test(errMsg(error)) ? 'Run update-34-delete-room-messages.sql in Supabase first.' : errMsg(error));
         toast('Message deleted'); loadRoomMsgs(orderId); }); }
     g.scrollTop = g.scrollHeight;
@@ -1748,7 +1751,7 @@
         <div class="room-acts"><button class="btn sm" data-rcopy="${o.id}">Copy link</button><a class="btn sm line" target="_blank" rel="noopener" href="${esc(waRoom(o))}">WhatsApp</a><button class="btn sm line" data-rqr="${o.id}">Show QR</button><button class="btn sm line" data-rpic="${o.id}">📷 Send as picture</button><a class="btn sm line" target="_blank" rel="noopener" href="${esc(roomLink(o))}">Open</a></div>
         <div class="room-ap ${o.approvedAt ? 'yes' : ''}">${o.approvedAt ? `✓ <b>Customer approved the design</b> · ${new Date(o.approvedAt).toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short' })} <button class="link-sm" data-runap="${o.id}">Undo</button>` : '⏳ Waiting for the customer to approve the design'}</div>
         <div class="room-msgs" id="roomMsgs"><span class="ph-empty">Loading messages…</span></div>
-        <form class="room-reply" id="roomReply"><input id="roomIn" placeholder="Reply to the customer…" autocomplete="off"><button class="btn sm">Send</button></form></div>` : ''}
+        <form class="room-reply" id="roomReply"><label class="btn sm line room-pic" title="Send a picture (gallery or camera)" aria-label="Send a picture">📷<input type="file" accept="image/*" id="roomPic" hidden></label><input id="roomIn" placeholder="Reply to the customer…" autocomplete="off"><button class="btn sm">Send</button></form></div>` : ''}
       <div class="ph-box ref"><div class="ph-head"><b>📐 What to make</b><small>Customer's sample, a sketch, the colour. Workers see these on their job.</small>
         ${o.delivered ? '' : '<label class="btn sm ph-add">🖼 Add from gallery<input type="file" accept="image/*" multiple id="phInRef" hidden></label><button type="button" class="btn sm line ph-add" data-refstock>📦 From stock</button><label class="btn sm line ph-add">📷 Take photo<input type="file" accept="image/*" capture="environment" multiple data-phinref hidden></label>'}</div>
         <div class="ph-grid" id="phRef"><span class="ph-empty">Loading…</span></div></div>
@@ -1781,7 +1784,20 @@
     if (o.room && !o.delivered){ loadRoomMsgs(o.id);
       $('#roomReply').onsubmit = async e => { e.preventDefault(); const t = $('#roomIn').value.trim(); if (!t) return;
         const { error } = await db.rpc('ws_room_reply', { p_order: o.id, p_text: t }); if (error) return toast(/ws_room_reply/.test(errMsg(error)) ? 'Run update-16-order-room.sql in Supabase first.' : errMsg(error));
-        $('#roomIn').value = ''; toast('Sent. The customer sees it in their Order Room.'); loadRoomMsgs(o.id); }; }
+        $('#roomIn').value = ''; toast('Sent. The customer sees it in their Order Room.'); loadRoomMsgs(o.id); };
+      // a picture to the customer, with whatever is typed in the box as its caption
+      $('#roomPic').onchange = async e => { const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+        const lab = e.target.closest('label'); lab.classList.add('busy');
+        try {
+          if (!db.storage) throw new Error('Pictures need the real Supabase');
+          const blob = await shrink(f), path = `reply/${o.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+          const up = await db.storage.from(ROOM_BUCKET).upload(path, blob, { contentType:'image/jpeg', upsert:false });
+          if (up.error) throw up.error;
+          const { error } = await db.rpc('ws_room_reply_photo', { p_order: o.id, p_path: path, p_text: $('#roomIn').value.trim() });
+          if (error){ await db.storage.from(ROOM_BUCKET).remove([path]); throw error; }
+          $('#roomIn').value = ''; toast('Picture sent. The customer sees it in their Order Room.'); loadRoomMsgs(o.id);
+        } catch (er){ toast(/ws_room_reply_photo|row-level|policy/i.test(errMsg(er)) ? 'Run update-35-reply-with-picture.sql in Supabase first.' : errMsg(er)); }
+        lab.classList.remove('busy'); }; }
     document.querySelectorAll('[data-phin]').forEach(phIn => { phIn.onchange = async () => { const fs = [...(phIn.files || [])]; phIn.value = ''; for (const f of fs) await addPhoto(o, f, 'done', fs.length > 1); if (fs.length > 1){ toast(`${fs.length} photos added to ${o.ref}`); loadPhotos(o.id); } }; });
     const rs = document.querySelector('[data-refstock]'); if (rs) rs.onclick = async () => { const r = await KStock.pick(db); if (!r) return; if (!r.file) return toast('Could not get that photo. Add it from the gallery instead.'); await addPhoto(o, r.file, 'ref'); };
     document.querySelectorAll('#phInRef, [data-phinref]').forEach(phR => { phR.onchange = async () => { const fs = [...(phR.files || [])]; phR.value = ''; for (const f of fs) await addPhoto(o, f, 'ref'); }; });

@@ -93,6 +93,8 @@
   .code-in{width:100%;height:58px;border:1.5px solid var(--line);border-radius:16px;padding:0 16px;font-size:22px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;background:#fff;font-family:ui-monospace,Menlo,Consolas,monospace}
   .code-in:focus{outline:none;border-color:var(--leaf)}
   .hidden{display:none!important}
+  .msg-pic{display:block;border:0;padding:0;background:none;margin-bottom:6px;cursor:zoom-in}
+  .msg-pic img{display:block;width:100%;max-width:230px;max-height:260px;object-fit:cover;border-radius:12px}
   .ord{display:flex;flex-direction:column;gap:12px}
   .ord-h{margin:0}
   .ord-pics{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;margin:0 -4px;padding:0 4px 2px}
@@ -194,7 +196,7 @@
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2E6B45" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add photo</button></div>
 
       <h2>Messages</h2>
-      <div class="msgs" id="msgs">${(R.msgs || []).length ? R.msgs.map(m => `<div class="msg ${m.who === 'customer' ? 'me' : 'them'}">${esc(m.text)}<small>${m.who === 'customer' ? 'You' : 'Kartech'} · ${esc(when(m.at))}</small></div>`).join('')
+      <div class="msgs" id="msgs">${(R.msgs || []).length ? R.msgs.map(m => `<div class="msg ${m.who === 'customer' ? 'me' : 'them'}">${m.photo ? `<button class="msg-pic" data-mpic="${esc(pub(m.photo))}" aria-label="Open picture"><img src="${esc(pub(m.photo))}" alt="Picture from Kartech" loading="lazy"></button>` : ''}${m.text ? esc(m.text) : ''}<small>${m.who === 'customer' ? 'You' : 'Kartech'} · ${esc(when(m.at))}</small></div>`).join('')
         : '<p class="empty">Ask anything or tell us a detail. Kartech will reply here.</p>'}</div>
       <button class="linkb" id="otherOrder" style="align-self:center;margin-top:6px">Not your order? See another order</button>`;
     $('#composer').classList.remove('hidden');
@@ -206,6 +208,7 @@
     v.querySelectorAll('[data-pic]').forEach(b => b.onclick = () => full(+b.dataset.pic));
     v.querySelectorAll('[data-dpic]').forEach(b => b.onclick = () => fullList(designUrls(), +b.dataset.dpic));
     v.querySelectorAll('[data-fpic]').forEach(b => b.onclick = () => fullList([b.dataset.fpic], 0));
+    v.querySelectorAll('[data-mpic]').forEach(b => b.onclick = () => fullList([b.dataset.mpic], 0));
     const ms = $('#msgs'); if (toMsgs && ms && ms.lastElementChild){ toMsgs = false; ms.lastElementChild.scrollIntoView({ block:'nearest' }); }
   }
 
