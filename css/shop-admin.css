@@ -209,3 +209,4 @@
 .rp-new input{ flex:1 1 160px; font-weight:600 }
 .rp-go:disabled{ opacity:.65; cursor:default }
 .rp-newtag{ display:inline-block; background:#185844; color:#fff; font-size:11px; font-weight:700; border-radius:6px; padding:1px 6px; vertical-align:2px }
+.mo-paidmark{ margin:10px 0 0; font-size:13.5px; color:var(--green, #2E7D4F) } .mo-paidmark .link-sm{ margin-left:2px }

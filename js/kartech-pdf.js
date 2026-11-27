@@ -119,18 +119,19 @@ window.KPDF = (() => {
     const bal = Number(inv.total) - Number(paid || 0);
     y = sums(doc, y + 4, paid ? [['Total', money(inv.total)], ['Paid so far', money(paid)], ['Balance due', money(bal), true]] : [['Total', money(inv.total), true]]);
     if (Number(paid || 0) > 0){
-      // money is in: the invoice now confirms it, and says work has started
+      // the invoice goes out once the deposit is in: it confirms the deposit, says work has started, and shows the balance
       const full = bal <= 0.005;
       stamp(doc, 16, y - 12, full ? 'PAID' : 'RECEIVED', full ? 'PAID IN FULL · THANK YOU' : 'DEPOSIT · THANK YOU');
       y += 2; doc.setFillColor(232, 243, 236); doc.setDrawColor(...C.green); doc.setLineWidth(0.4); doc.roundedRect(12, y, 124, 24, 3, 3, 'FD');
       doc.setFillColor(...C.green); doc.circle(21, y + 8.2, 3.6, 'F');
       doc.setDrawColor(...C.white); doc.setLineWidth(0.8); doc.line(19.4, y + 8.3, 20.6, y + 9.6); doc.line(20.6, y + 9.6, 22.8, y + 6.8);
       doc.setTextColor(...C.green); doc.setFont('helvetica', 'bold'); doc.setFontSize(11.5);
-      doc.text(stage === 'delivered' ? 'Payment received. Order delivered.' : stage === 'ready' ? 'Payment received. Your order is ready.' : 'Payment received. Work has started.', 28, y + 9.6);
+      const head1 = full ? 'Paid in full. Thank you!' : stage === 'ready' ? 'Deposit received. Your order is ready.' : stage === 'delivered' ? 'Deposit received. Order delivered.' : 'Deposit received. Work has started.';
+      doc.text(head1, 28, y + 9.6);
       doc.setFont('helvetica', 'normal'); doc.setFontSize(8.6); doc.setTextColor(...C.ink);
-      const then = stage === 'delivered' ? 'It has been a pleasure making it for you.' : stage === 'ready' ? (full ? 'We will arrange delivery or collection with you.' : 'Pay the balance and we will arrange delivery or collection.')
-        : full ? 'Your order is in the workshop and we will let you know when it is ready.' : 'Your order is now in the workshop. You can follow it on your Kartech order page.';
-      doc.text(doc.splitTextToSize(`We have received ${money(paid)}${full ? ', the full amount' : ''}. Thank you! ${then}`, 104), 28, y + 15);
+      const then = full ? 'Nothing more to pay on this order.' : stage === 'ready' ? 'Pay the balance and we will arrange delivery or collection.'
+        : stage === 'delivered' ? 'Please pay the balance below.' : 'Your order is now in our workshop. You can follow every step on your Kartech order page.';
+      doc.text(doc.splitTextToSize(`We have received ${money(paid)}. ${then}`, 104), 28, y + 15);
       y += 28;
       if (!full){
         doc.setFillColor(...C.soft); doc.roundedRect(12, y, 124, 17, 3, 3, 'F');
@@ -140,23 +141,20 @@ window.KPDF = (() => {
         doc.text(['M-Pesa · ' + (biz.pay_phone ? phoneNice(biz.pay_phone) : 'ask Kartech'), biz.pay_name || ''].filter(Boolean), 80, y + 8);
       }
       await foot(doc, full ? ['Kartech Engineering · thank you for your order.', 'Nothing more to pay on this invoice.', 'Prices in Kenya Shillings.']
-                           : ['Kartech Engineering · thank you for your order.', 'The balance is due before delivery.', 'Prices in Kenya Shillings.'], inv.check_code);
+                           : ['Kartech Engineering · thank you for your order.', 'The balance is due before delivery. You get a receipt when it is paid.', 'Prices in Kenya Shillings.'], inv.check_code);
       return doc.output('blob');
     }
-    // how to pay
-    y += 2; doc.setFillColor(...C.soft); doc.roundedRect(12, y, 124, 24, 3, 3, 'F');
-    label(doc, 'HOW TO PAY', 17, y + 6);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(...C.ink);
-    doc.text('M-Pesa · Send money to', 17, y + 11.5);
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.text(biz.pay_phone ? phoneNice(biz.pay_phone) : 'Ask Kartech', 17, y + 17.5);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); if (biz.pay_name) doc.text(biz.pay_name, 17, y + 21.5);
-    doc.setFontSize(7.8); doc.setTextColor(...C.muted);
-    doc.text(doc.splitTextToSize('Work starts as soon as we receive your deposit. After paying, open your Kartech order page and tap "I\'ve paid", or send us the M-Pesa message.', 52), 80, y + 10);
+    // no payment recorded on it yet (the deposit is taken before the invoice is written): no "please pay" box, just what's due before delivery
+    y += 2; doc.setFillColor(...C.soft); doc.roundedRect(12, y, 124, 17, 3, 3, 'F');
+    label(doc, 'DUE BEFORE DELIVERY', 17, y + 6);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...C.ink); doc.text(money(bal), 17, y + 12.5);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.3); doc.setTextColor(...C.muted);
+    doc.text(['M-Pesa · ' + (biz.pay_phone ? phoneNice(biz.pay_phone) : 'ask Kartech'), biz.pay_name || ''].filter(Boolean), 80, y + 8);
     await foot(doc, ['Kartech Engineering · thank you for your order.', 'The balance is due before delivery.', 'Prices in Kenya Shillings.'], inv.check_code);
     return doc.output('blob');
   }
 
-  async function receipt({ biz, inv, pay, paidSoFar, balance, withOrder }){
+  async function receipt({ biz, inv, pay, paidSoFar, balance, withOrder, stage }){
     const { jsPDF } = await load(); const doc = new jsPDF({ unit: 'mm', format: 'a5' });
     doc.setProperties({ title: 'Kartech receipt ' + pay.no, author: 'Kartech Engineering' });
     let y = head(doc, biz, 'RECEIPT', pay.no, dayTime(pay.created_at));
@@ -171,7 +169,15 @@ window.KPDF = (() => {
     doc.text(pay.method + (pay.reference ? ' code' : ''), 131, y + 6.5, { align: 'right' });
     if (pay.reference){ doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.text(pay.reference, 131, y + 11.8, { align: 'right', charSpace: 0.3 }); }
     doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.text(kind, 131, y + 16.5, { align: 'right' });
-    y += 28;
+    y += 23;
+    // what this payment means for the order
+    doc.setFillColor(232, 243, 236); doc.roundedRect(12, y, 124, 9, 2.5, 2.5, 'F');
+    doc.setFillColor(...C.green); doc.circle(17.5, y + 4.5, 2.4, 'F');
+    doc.setDrawColor(...C.white); doc.setLineWidth(0.6); doc.line(16.4, y + 4.6, 17.2, y + 5.5); doc.line(17.2, y + 5.5, 18.8, y + 3.5);
+    doc.setTextColor(...C.green); doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5);
+    doc.text(balance <= 0 ? (stage === 'delivered' ? 'Paid in full. Order delivered. Thank you!' : stage === 'ready' ? 'Paid in full. Your order is ready.' : 'Paid in full. Thank you!')
+      : stage === 'delivered' ? 'Payment received. Order delivered.' : stage === 'ready' ? 'Payment received. Your order is ready.' : 'Payment received. Work has started.', 22, y + 5.9);
+    y += 15;
     const yS = y;
     y = sums(doc, y, [['Invoice total', money(inv.total)], ['Paid so far', money(paidSoFar)], ['Balance due', money(Math.max(0, balance)), true]]);
     stamp(doc, 18, yS + 9, balance <= 0 ? 'PAID IN FULL' : 'PAID', (kind.toUpperCase() + ' · ' + day(pay.created_at).toUpperCase()));

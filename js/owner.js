@@ -1500,7 +1500,8 @@
       ${!S.pay.phone ? `<p class="pay-warn">Add the M-Pesa number clients pay to: <button class="link-sm" id="paySetGo">Settings → Payments</button></p>` : ''}
       ${hold}${claimBox}
       <div class="mo-empty"><span>No invoice yet.</span><button class="btn sm" data-minv="${o.id}">🧾 Make invoice</button></div>
-      ${o.paidAt ? '' : `<button class="link-sm mo-noinv" data-pok="full" data-po="${o.id}">No invoice needed? Mark as fully paid</button>`}</div>`;
+      ${o.paidAt ? `<p class="mo-paidmark">✓ <b>Marked as fully paid</b>${o.delivered ? '' : ` · <button class="link-sm" data-pundo="full" data-po="${o.id}">Undo</button>`}</p>`
+        : `<button class="link-sm mo-noinv" data-pok="full" data-po="${o.id}">No invoice needed? Mark as fully paid</button>`}</div>`;
     return `<div class="pay-box">
       <div class="ph-head"><b>💳 Invoice & payments</b><small>Only you see amounts. The manager and workers never do.</small></div>
       ${hold}${claimBox}
@@ -1615,8 +1616,7 @@
 
   async function invoiceBlob(id){
     const inv = S.money.inv.find(i => i.id === id); if (!inv) throw new Error('Invoice not found');
-    // where the work is, so a paid invoice says the right thing (started / ready / delivered)
-    const o = inv.order_id && S.orders.find(x => x.id === inv.order_id), pr = o && orderProgress(o);
+    const o = inv.order_id && S.orders.find(x => x.id === inv.order_id), pr = o && orderProgress(o);   // where the work is: started / ready / delivered
     return KPDF.invoice({ biz: S.money.biz, inv, paid: paidOf(inv), stage: !o ? 'started' : o.delivered ? 'delivered' : pr && pr.finished ? 'ready' : 'started' });
   }
   async function receiptBlob(id, withOrder){
@@ -1624,7 +1624,9 @@
     const inv = S.money.inv.find(i => i.id === p.invoice_id);
     const upTo = paysOf(inv).filter(x => new Date(x.created_at) <= new Date(p.created_at)).reduce((a, x) => a + Number(x.amount), 0);
     const extra = withOrder && inv && inv.order_id && O(inv.order_id) ? orderArgs(inv.order_id, inv) : null;
-    return KPDF.receipt({ biz: S.money.biz, inv, pay: p, paidSoFar: upTo, balance: Number(inv.total) - upTo, withOrder: extra });
+    const ro = inv.order_id && S.orders.find(x => x.id === inv.order_id), rp = ro && orderProgress(ro);
+    return KPDF.receipt({ biz: S.money.biz, inv, pay: p, paidSoFar: upTo, balance: Number(inv.total) - upTo, withOrder: extra,
+      stage: !ro ? 'started' : ro.delivered ? 'delivered' : rp && rp.finished ? 'ready' : 'started' });
   }
   async function sendInvoice(id, blob){
     const inv = S.money.inv.find(i => i.id === id), o = inv && O(inv.order_id);
