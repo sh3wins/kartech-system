@@ -216,3 +216,7 @@
 .mo-dep-row{ display:grid; grid-template-columns:1fr 1fr 1.3fr; gap:8px }
 .mo-dep-row .field{ margin:0 }
 @media (max-width:560px){ .mo-dep-row{ grid-template-columns:1fr 1fr } }
+.rm-del{ border:0; background:none; cursor:pointer; font:inherit; font-size:12px; padding:0 2px; margin-left:8px; opacity:.45 }
+.rm:hover .rm-del,.rm-del:focus-visible{ opacity:1 }
+.rm-del.sure{ opacity:1; color:#C0392B; font-weight:700 }
+.rm.mine .rm-del.sure{ color:#FFD4CC }

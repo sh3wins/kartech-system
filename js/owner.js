@@ -1134,8 +1134,14 @@
     const { data, error } = await db.from('ws_room_msgs').select('*').in('order_id', [orderId]).order('id');
     if (!document.body.contains(g)) return;
     if (error){ g.innerHTML = `<span class="ph-empty">${/ws_room_msgs/.test(errMsg(error)) ? 'Run update-16-order-room.sql in Supabase to turn on the Order Room.' : esc(errMsg(error))}</span>`; return; }
-    g.innerHTML = data.length ? data.slice(-30).map(m => `<div class="rm ${m.who === 'kartech' ? 'mine' : ''}">${esc(m.text)}<small>${m.who === 'kartech' ? 'You' : 'Customer'} · ${ago(new Date(m.at).getTime())}</small></div>`).join('')
+    g.innerHTML = data.length ? data.slice(-30).map(m => `<div class="rm ${m.who === 'kartech' ? 'mine' : ''}">${esc(m.text)}<small>${m.who === 'kartech' ? 'You' : 'Customer'} · ${ago(new Date(m.at).getTime())}<button class="rm-del" data-rmdel="${m.id}" title="Delete this message (the customer won't see it either)" aria-label="Delete message">🗑</button></small></div>`).join('')
       : '<span class="ph-empty">No messages yet.</span>';
+    if (!g.dataset.delBound){ g.dataset.delBound = 1;
+      g.addEventListener('click', async e => { const x = e.target.closest('[data-rmdel]'); if (!x) return; e.stopPropagation();
+        if (!x.classList.contains('sure')){ x.classList.add('sure'); x.textContent = 'Delete?'; setTimeout(() => { if (document.body.contains(x)){ x.classList.remove('sure'); x.textContent = '🗑'; } }, 4000); return; }
+        x.disabled = true; const { error } = await db.rpc('ws_room_msg_delete', { p_id: +x.dataset.rmdel });
+        if (error) return toast(/ws_room_msg_delete/.test(errMsg(error)) ? 'Run update-34-delete-room-messages.sql in Supabase first.' : errMsg(error));
+        toast('Message deleted'); loadRoomMsgs(orderId); }); }
     g.scrollTop = g.scrollHeight;
   }
   const loadQR = () => KQR.load();
