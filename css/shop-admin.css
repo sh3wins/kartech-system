@@ -224,3 +224,22 @@
 .room-pic.busy{ opacity:.5; pointer-events:none }
 .rm.has-pic{ max-width:72% }
 .rm-pic{ display:block; width:100%; max-width:240px; max-height:240px; object-fit:cover; border-radius:10px; margin-bottom:6px }
+
+/* ---------- what a worker took ---------- */
+.tk-span{ display:flex; gap:6px; flex-wrap:wrap; margin:4px 0 14px }
+.tk-span .km-b{ border:1px solid var(--line); background:#fff; border-radius:999px; padding:7px 14px; font:inherit; font-size:13.5px; font-weight:600; cursor:pointer; color:var(--ink) }
+.tk-span .km-b.on{ background:var(--deep, #185844); border-color:var(--deep, #185844); color:#fff }
+.tk-sum{ display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:8px }
+.tk-it{ background:#fff; border:1px solid var(--line); border-radius:12px; padding:10px 12px; display:flex; flex-direction:column; gap:3px }
+.tk-it > b{ font-size:15px; display:flex; align-items:center }
+.tk-it span{ font-size:13.5px; color:var(--muted) } .tk-it span b{ color:var(--ink) }
+.tk-it em{ font-style:normal; font-size:12.5px; color:var(--green, #2E7D4F); font-weight:600 }
+.tk-it em.still{ color:#B3261E }
+.tk-h{ margin:18px 0 6px; font-size:16px }
+.tk-list{ max-height:42vh; overflow-y:auto; border-top:1px solid var(--line) }
+.tk-day{ margin:12px 0 4px; font-size:12.5px; font-weight:700; color:var(--muted); text-transform:none }
+.tk-r{ display:grid; grid-template-columns:52px 1fr; gap:10px; padding:7px 2px; border-bottom:1px solid var(--line); font-size:14.5px }
+.tk-t{ color:var(--muted); font-size:12.5px; padding-top:2px; font-variant-numeric:tabular-nums }
+.tk-r.tk-back span:last-child{ color:var(--green, #2E7D4F) }
+.tk-o{ color:var(--muted); font-size:13px }
+.tk-empty{ border:1.5px dashed var(--line); border-radius:14px; padding:20px; text-align:center; color:var(--muted) }

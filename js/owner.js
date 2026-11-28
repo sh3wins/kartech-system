@@ -634,11 +634,11 @@
   function viewWorkers(){
     const row = w => { const [k, l] = workerStatus(w); const t = w.task && T(w.task); const o = t && O(t.order);
       const nPlan = w.active ? S.tasks.filter(x => x.status !== 'done' && x.planned.includes(w.id) && x.worker !== w.id && O(x.order) && !O(x.order).delivered).length : 0;
-      return `<div class="item"><button class="grow w-open" data-editw="${w.id}"><div class="t">${esc(w.name)} <span class="pill p-${k}">${l}</span></div>
+      return `<div class="item"><button class="grow w-open" data-took="${w.id}" title="See everything ${esc(w.name)} has taken"><div class="t">${esc(w.name)} <span class="pill p-${k}">${l}</span></div>
         <div class="s">${stageName(w.stage)}${w.covers.length ? ` · also ${w.covers.map(c => stageName(c).toLowerCase()).join(', ')}` : ''}${o ? ` · on ${o.ref}` : ''}</div></button>
         ${w.active ? (w.here ? `<span class="in-chip">✓ In${w.arrivedAt ? ' ' + new Date(w.arrivedAt).toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' }) : ''}</span><button class="btn sm line away-btn" data-away="${w.id}" data-v="1">Away today</button>`
           : `<button class="btn sm away-btn" data-away="${w.id}" data-v="0">Mark in</button>${w.away ? '' : `<button class="btn sm line away-btn" data-away="${w.id}" data-v="1">Away</button>`}`) : ''}
-        ${w.active ? `<button class="btn sm line" data-chat="${w.id}">💬</button>` : ''}<button class="btn sm line" data-editw="${w.id}">Edit</button></div>`; };
+        <button class="btn sm line" data-took="${w.id}" title="What ${esc(w.name)} has taken">📦 Taken</button>${w.active ? `<button class="btn sm line" data-chat="${w.id}">💬</button>` : ''}<button class="btn sm line" data-editw="${w.id}">Edit</button></div>`; };
     const away = S.workers.filter(w => w.active && w.away);
     return `
       <div style="display:flex;justify-content:space-between;align-items:end;gap:12px;flex-wrap:wrap"><div><h2>Workers</h2>
@@ -652,6 +652,51 @@
       <div class="bin-link"><button class="btn line sm" id="binOpen">🗑 Bin</button><small>Deleted orders, workers and pictures stay here for 30 days.</small></div>`;
   }
 
+
+  /* ---------- WHAT A WORKER TOOK: tap a worker, see everything they took (tools, materials, fabric) ---------- */
+  async function takenModal(wid, span){
+    const w = W(wid); if (!w) return; span = span || 'month';
+    const s = openModal(`<h2>📦 What ${esc(w.name)} took</h2><p class="sub" style="margin-top:-4px">Tools, materials and fabric, from the workshop records and the rough paper.</p>
+      <div class="tk-span">${[['week', 'This week'], ['month', 'This month'], ['all', 'Everything']].map(([k, l]) => `<button class="km-b ${span === k ? 'on' : ''}" data-tks="${k}">${l}</button>`).join('')}</div>
+      <div id="tkBody"><p class="hint-sm">Loading…</p></div>
+      <div class="actions"><button class="btn line" data-x>Close</button></div>`);
+    s.querySelectorAll('[data-tks]').forEach(b => b.onclick = () => { closeModal(); takenModal(wid, b.dataset.tks); });
+    const now = new Date(), from = span === 'all' ? null : span === 'week'
+      ? new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7))   // Monday
+      : new Date(now.getFullYear(), now.getMonth(), 1);
+    let q = db.from('ws_moves').select('*').eq('worker_id', wid).order('id', { ascending:false }).limit(1000);
+    if (from) q = q.gte('at', from.toISOString());
+    let fq = db.from('ws_worker_notes').select('*').eq('worker_id', wid).order('id', { ascending:false }).limit(800);
+    if (from) fq = fq.gte('created_at', from.toISOString());
+    const [mv, fn] = await Promise.all([q, fq]);
+    const box = s.querySelector('#tkBody'); if (!box) return;
+    if (mv.error) return box.innerHTML = `<p class="hint-sm">${esc(errMsg(mv.error))}</p>`;
+    const moves = mv.data.filter(x => x.kind === 'out' || x.kind === 'back'), fabs = fn.error ? [] : fn.data.filter(x => x.fabric_id && x.metres);
+    // totals per item: took, brought back, still with them
+    const tot = {};
+    moves.forEach(x => { const m = M(x.material_id), k = 'm' + x.material_id;
+      const t = tot[k] || (tot[k] = { name: m ? m.name : 'An item', unit: m ? m.unit : '', took: 0, back: 0 });
+      if (x.kind === 'out') t.took += Math.abs(+x.qty); else t.back += Math.abs(+x.qty); });   // 'out' is stored as a minus (the store went down)
+    fabs.forEach(x => { const f = (S.fabs || []).find(y => y.id === x.fabric_id), k = 'f' + x.fabric_id;
+      const t = tot[k] || (tot[k] = { name: f ? fabName(f) : (x.body.replace(/^Took [\d.]+ m /, '').split(':')[0]), unit: 'm', took: 0, back: 0, fab: f });
+      t.took += +x.metres; });
+    const rows = Object.values(tot).sort((a, b) => b.took - a.took);
+    if (!rows.length) return box.innerHTML = `<div class="tk-empty">Nothing recorded for ${esc(w.name)} ${span === 'week' ? 'this week' : span === 'month' ? 'this month' : 'yet'}.<br><small>Things given out on the workshop screen or written on the 📝 Rough paper show here.</small></div>`;
+    const day = t => new Date(t).toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short' });
+    const tm = t => new Date(t).toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' });
+    const items = moves.map(x => ({ at: new Date(x.at).getTime(), kind: x.kind, qty: Math.abs(+x.qty), m: M(x.material_id), order: x.order_id }))
+      .concat(fabs.map(x => ({ at: new Date(x.created_at).getTime(), kind: 'fab', qty: +x.metres, body: x.body }))).sort((a, b) => b.at - a.at);
+    let last = '';
+    box.innerHTML = `<div class="tk-sum">${rows.map(t => { const has = Math.round((t.took - t.back) * 100) / 100;
+        return `<div class="tk-it"><b>${t.fab ? fsw(t.fab.hex, false, t.fab.photo) : ''}${esc(t.name)}</b>
+          <span>Took <b>${n2(t.took)}</b> ${esc(t.unit)}${t.back ? ` · returned <b>${n2(t.back)}</b>` : ''}</span>
+          ${t.back ? `<em class="${has > 0 ? 'still' : ''}">${has > 0 ? `${n2(has)} ${esc(t.unit)} not returned` : 'all returned'}</em>` : ''}</div>`; }).join('')}</div>
+      <h3 class="tk-h">Day by day</h3>
+      <div class="tk-list">${items.map(x => { const d = day(x.at), head = d !== last ? `<p class="tk-day">${d}</p>` : ''; last = d;
+        const o = x.order && O(x.order);
+        const what = x.kind === 'fab' ? `🧵 ${esc(x.body)}` : `${x.kind === 'back' ? '↩️ Returned' : '📤 Took'} <b>${n2(x.qty)} ${esc(x.m ? x.m.unit : '')}</b> ${esc(x.m ? x.m.name : 'item')}${o ? ` <span class="tk-o">for ${esc(o.ref)}</span>` : ''}`;
+        return head + `<div class="tk-r tk-${x.kind}"><span class="tk-t">${tm(x.at)}</span><span>${what}</span></div>`; }).join('')}</div>`;
+  }
 
   /* ---------- history: look back at any day ---------- */
   const H = { day: null, worker: '', data: null, loading: false, err: '', mode: 'day', week: null, wdata: null };
@@ -971,6 +1016,7 @@
     if (e.target.closest('#sideSet') || e.target.closest('#mSet')) return settingsModal();
     const ch = e.target.closest('[data-chat]'); if (ch) return openChat(ch.dataset.chat);
     const ew = e.target.closest('[data-editw]'); if (ew) return workerModal(ew.dataset.editw);
+    const tk = e.target.closest('[data-took]'); if (tk) return takenModal(tk.dataset.took);
     const odl = e.target.closest('[data-odel]'); if (odl){
       const o = O(odl.dataset.odel); if (!o) return;
       if (!odl.classList.contains('sure')){
